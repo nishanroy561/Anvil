@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://anvil.dev/schemas/trace-batch.json",
+  "title": "Anvil trace ingestion batch",
+  "description": "Wire format for POST /v1/ingest/traces. Source of truth for both SDKs and the API validator (plan/architecture.md §4). project_id is NEVER accepted from the payload — it is stamped from the resolved API key.",
+  "type": "object",
+  "required": ["traces"],
+  "additionalProperties": false,
+  "properties": {
+    "traces": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/trace" }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "trace": {
+      "type": "object",
+      "required": ["id", "name", "started_at"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "maxLength": 512 },
+        "status": { "enum": ["ok", "error", "in_progress"] },
+        "input": {},
+        "output": {},
+        "metadata": { "type": "object" },
+        "model": { "type": ["string", "null"], "maxLength": 256 },
+        "session_id": { "type": ["string", "null"], "maxLength": 256 },
+        "user_ref": { "type": ["string", "null"], "maxLength": 256 },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "ended_at": { "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }] },
+        "spans": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": { "$ref": "#/$defs/span" }
+        }
+      }
+    },
+    "span": {
+      "type": "object",
+      "required": ["id", "name", "type", "started_at"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "parent_span_id": { "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "name": { "type": "string", "maxLength": 512 },
+        "type": { "enum": ["llm", "retrieval", "tool", "embedding", "chain", "custom"] },
+        "status": { "enum": ["ok", "error", "in_progress"] },
+        "input": {},
+        "output": {},
+        "attributes": { "type": "object" },
+        "tokens_in": { "type": ["integer", "null"], "minimum": 0 },
+        "tokens_out": { "type": ["integer", "null"], "minimum": 0 },
+        "error": { "type": ["string", "null"] },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "ended_at": { "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }] }
+      }
+    }
+  }
+}

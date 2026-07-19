@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: anvil-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+
+  # Worker metric servers (plan/observability.md §1). Targets come alive as
+  # the corresponding phases are built; Prometheus tolerates them being down.
+  - job_name: anvil-worker-ingest
+    static_configs:
+      - targets: ["worker:9101"]
+  - job_name: anvil-worker-eval
+    static_configs:
+      - targets: ["worker:9102"]
+  - job_name: anvil-worker-schedulers
+    static_configs:
+      - targets: ["worker:9103"]

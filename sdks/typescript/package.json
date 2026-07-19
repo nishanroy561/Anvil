@@ -1,0 +1,12 @@
+{
+  "name": "@anvil/sdk",
+  "version": "0.0.1",
+  "description": "Anvil TypeScript SDK — trace instrumentation for LLM apps (Phase 3, plan/sdk.md)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "engines": { "node": ">=18" }
+}

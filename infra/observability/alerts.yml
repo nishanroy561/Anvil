@@ -1,0 +1,47 @@
+# Alert rules per plan/observability.md §1. The backlog gauges
+# (anvil_stream_depth, anvil_dlq_depth) are exported by the API — a dead
+# worker can't report the backlog it isn't draining (ADR-0009).
+groups:
+  - name: anvil-ingestion
+    rules:
+      - alert: IngestStreamAboveHighWater
+        expr: anvil_stream_depth > 80000
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Ingest stream depth above high-water for 2m (backpressure engaged)"
+
+      - alert: IngestDLQNotEmpty
+        expr: anvil_dlq_depth > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Poison messages present in ingest DLQ"
+
+      - alert: IngestConsumerLagGrowing
+        # Catches a STUCK worker (delivering but not acking). A DEAD worker
+        # freezes this gauge — that case is caught by WorkerTargetDown +
+        # IngestStreamAboveHighWater instead.
+        expr: delta(anvil_consumer_lag[5m]) > 0 and anvil_consumer_lag > 1000
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Consumer lag growing for 5m — worker stuck?"
+
+      - alert: WorkerTargetDown
+        expr: up{job=~"anvil-worker-.*"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "A worker metrics target is down"
+
+  - name: anvil-api
+    rules:
+      - alert: ApiHighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m])) > 0.01
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "API 5xx rate above 1% for 5m"
