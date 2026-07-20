@@ -14,6 +14,7 @@
 - UTC everywhere; timezone rendering is frontend-only.
 - Before finishing a phase, check `plan.md`'s edge-case checklist rows tagged with that phase.
 - Update `STATUS.md` whenever you complete meaningful work — it is the handoff document between sessions/models.
+- **Frontend work needs a heads-up first.** Before starting any work in `apps/web` (or other UI: components, styling, pages), tell the user what you intend to build and wait for their go-ahead. Backend/API/worker/SDK work proceeds without asking. This applies to Phase 4 (dashboard) and to any UI touched incidentally in a later phase.
 
 ## Commands (Windows dev box; `make` may be unavailable — run these directly)
 

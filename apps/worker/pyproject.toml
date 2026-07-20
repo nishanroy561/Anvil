@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "ruff>=0.4"]
+dev = ["pytest>=8.2", "pytest-asyncio>=1.0", "ruff>=0.4"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -23,3 +23,13 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["anvil_worker*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# One loop per session: the engine is built at import time and its pool is
+# bound to the loop that created it (same reasoning as apps/api).
+asyncio_default_test_loop_scope = "session"
+asyncio_default_fixture_loop_scope = "session"
+
+[tool.ruff]
+line-length = 100

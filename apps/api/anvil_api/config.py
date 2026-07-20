@@ -20,8 +20,18 @@ class Settings(BaseSettings):
 
     # Ingestion (Phase 2)
     ingest_high_water: int = 80_000
+    # 20k of headroom over the high-water mark so approximate trimming never
+    # eats unprocessed entries (plan/ingestion.md §2).
+    ingest_stream_maxlen: int = 100_000
     ingest_rate_limit_rpm: int = 300
     ingest_rate_limit_traces_pm: int = 5_000
+    ingest_max_body_bytes: int = 5 * 1024 * 1024
+    ingest_max_field_bytes: int = 100 * 1024
+    # Dashboard free-text search: trigram floor and server-enforced time bound.
+    search_min_chars: int = 3
+    search_default_days: int = 7
+    search_max_days: int = 30
+    traces_page_size_max: int = 200
 
     # Eval spend guards (Phase 5)
     max_eval_items: int = 500

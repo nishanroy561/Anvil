@@ -1,7 +1,6 @@
 """Smoke tests runnable without backing services: they assert shape, not
-connectivity. Full Phase-1 acceptance tests (signup/login, tenant 404s,
-rate limits) require Postgres+Redis and are the next model's first task —
-see STATUS.md."""
+connectivity. The Phase-1 acceptance tests (signup/login, tenant 404s, rate
+limits, seed) live in the sibling modules and need Postgres+Redis."""
 
 
 async def test_healthz_shape(client):

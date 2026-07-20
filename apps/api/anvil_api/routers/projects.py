@@ -2,12 +2,14 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import current_user, generate_api_key
 from ..db import get_session
+from ..deps import NOT_FOUND as _NOT_FOUND
+from ..deps import owned_project as _owned_project
 from ..models import ApiKey, Project, User
 from ..schemas.projects import (
     ApiKeyCreate,
@@ -18,18 +20,6 @@ from ..schemas.projects import (
 )
 
 router = APIRouter(prefix="/v1", tags=["projects"])
-
-# Tenant behavior: resources outside the caller's org 404 (never 403).
-_NOT_FOUND = HTTPException(404, detail={"code": "not_found", "message": "Not found"})
-
-
-async def _owned_project(
-    project_id: uuid.UUID, user: User, session: AsyncSession
-) -> Project:
-    project = await session.get(Project, project_id)
-    if project is None or project.org_id != user.org_id:
-        raise _NOT_FOUND
-    return project
 
 
 @router.get("/projects", response_model=list[ProjectOut])

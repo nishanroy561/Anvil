@@ -5,6 +5,7 @@ resolved credential, never from a request body."""
 import hashlib
 import secrets
 import uuid
+from typing import NamedTuple
 
 from fastapi import Depends, HTTPException, Request, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -74,9 +75,18 @@ def generate_api_key() -> tuple[str, str, str]:
     return full, f"ak_{prefix}", hashlib.sha256(full.encode()).hexdigest()
 
 
-async def current_project_from_api_key(
+class ApiKeyContext(NamedTuple):
+    """The resolved credential. Ingest needs the key itself (per-key rate
+    limits are the noisy-neighbor guard — one project can hold several keys)
+    as well as the project it grants access to."""
+
+    api_key: ApiKey
+    project: Project
+
+
+async def current_api_key_context(
     request: Request, session: AsyncSession = Depends(get_session)
-) -> Project:
+) -> ApiKeyContext:
     header = request.headers.get("authorization", "")
     if not header.lower().startswith("bearer ak_"):
         raise HTTPException(401, detail={"code": "invalid_api_key", "message": "API key required"})
@@ -89,4 +99,10 @@ async def current_project_from_api_key(
     pair = row.first()
     if pair is None:
         raise HTTPException(401, detail={"code": "invalid_api_key", "message": "Unknown or revoked key"})
-    return pair[1]
+    return ApiKeyContext(api_key=pair[0], project=pair[1])
+
+
+async def current_project_from_api_key(
+    context: ApiKeyContext = Depends(current_api_key_context),
+) -> Project:
+    return context.project
