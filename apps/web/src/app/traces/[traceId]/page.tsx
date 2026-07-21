@@ -11,6 +11,7 @@ import { SpanDetail } from "@/components/SpanDetail";
 import { JsonView } from "@/components/JsonView";
 import { CopyButton, ErrorNote, Spinner } from "@/components/ui";
 import { Wordmark } from "@/components/Brand";
+import { AddToDataset } from "@/components/evals/AddToDataset";
 
 function HeaderStat({ label, value }: { label: string; value: string }) {
   return (
@@ -102,15 +103,7 @@ export default function TracePage({ params }: { params: { traceId: string } }) {
             >
               {showTraceIO ? "Hide" : "Show"} trace I/O
             </button>
-            {/* Wired to datasets in Phase 5 (evaluation.md) — present per plan §3 */}
-            <button
-              type="button"
-              disabled
-              title="Datasets arrive in Phase 5"
-              className="btn-ghost cursor-not-allowed opacity-50"
-            >
-              Add to dataset
-            </button>
+            <AddToDataset projectId={trace.project_id} traceIds={[trace.id]} />
           </div>
         </div>
 

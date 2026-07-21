@@ -6,6 +6,11 @@
 
 import type {
   ApiKey,
+  Dataset,
+  DatasetItem,
+  EvalResult,
+  EvalRun,
+  GraderInfo,
   MetricsOverview,
   Project,
   TraceDetail,
@@ -117,6 +122,80 @@ export const listTraces = (projectId: string, filters: TraceFilters = {}) => {
 };
 
 export const getTrace = (traceId: string) => request<TraceDetail>(`/v1/traces/${traceId}`);
+
+// ---- datasets (Phase 5) ---------------------------------------------------
+
+export const listDatasets = (projectId: string) =>
+  request<Dataset[]>(`/v1/projects/${projectId}/datasets`);
+
+export const createDataset = (projectId: string, name: string, description?: string) =>
+  request<Dataset>(`/v1/projects/${projectId}/datasets`, {
+    method: "POST",
+    body: JSON.stringify({ name, description: description || null }),
+  });
+
+export const getDataset = (datasetId: string) => request<Dataset>(`/v1/datasets/${datasetId}`);
+
+export const deleteDataset = (datasetId: string) =>
+  request<void>(`/v1/datasets/${datasetId}`, { method: "DELETE" });
+
+export const listDatasetItems = (datasetId: string, limit = 200, offset = 0) =>
+  request<{ items: DatasetItem[]; total: number }>(
+    `/v1/datasets/${datasetId}/items?limit=${limit}&offset=${offset}`,
+  );
+
+export const addDatasetItems = (
+  datasetId: string,
+  items: { input?: unknown; expected_output?: unknown; metadata?: Record<string, unknown> }[],
+) =>
+  request<DatasetItem[]>(`/v1/datasets/${datasetId}/items`, {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+
+export const updateDatasetItem = (
+  itemId: string,
+  patch: { input?: unknown; expected_output?: unknown },
+) =>
+  request<DatasetItem>(`/v1/dataset-items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+
+export const deleteDatasetItem = (itemId: string) =>
+  request<void>(`/v1/dataset-items/${itemId}`, { method: "DELETE" });
+
+export const promoteTraces = (datasetId: string, traceIds: string[]) =>
+  request<{ promoted: number; skipped: number }>(`/v1/datasets/${datasetId}/promote`, {
+    method: "POST",
+    body: JSON.stringify({ trace_ids: traceIds }),
+  });
+
+// ---- eval runs (Phase 5) --------------------------------------------------
+
+export const listGraders = () => request<GraderInfo[]>("/v1/graders");
+
+export const listEvalRuns = (projectId: string, datasetId?: string) =>
+  request<EvalRun[]>(
+    `/v1/projects/${projectId}/eval-runs${datasetId ? `?dataset_id=${datasetId}` : ""}`,
+  );
+
+export const getEvalRun = (runId: string) => request<EvalRun>(`/v1/eval-runs/${runId}`);
+
+export const getEvalResults = (runId: string, limit = 200, offset = 0) =>
+  request<{ items: EvalResult[]; total: number }>(
+    `/v1/eval-runs/${runId}/results?limit=${limit}&offset=${offset}`,
+  );
+
+export const createEvalRun = (body: {
+  dataset_id: string;
+  name: string;
+  target: { mode: "rescore" | "generate"; model?: string; prompt?: string };
+  graders: { name: string; config: Record<string, unknown> }[];
+}) => request<EvalRun>("/v1/eval-runs", { method: "POST", body: JSON.stringify(body) });
+
+export const cancelEvalRun = (runId: string) =>
+  request<EvalRun>(`/v1/eval-runs/${runId}/cancel`, { method: "POST" });
 
 export const metricsOverview = (projectId: string, opts: { since?: string; interval?: "hour" | "day" } = {}) => {
   const params = new URLSearchParams();

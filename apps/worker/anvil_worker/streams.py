@@ -8,5 +8,7 @@ them in both places, in the same commit.
 TRACES_STREAM = "ingest:traces"
 FEEDBACK_STREAM = "ingest:feedback"
 DLQ_STREAM = "ingest:dlq"
+EVAL_JOBS_STREAM = "eval:jobs"
 
 PERSISTERS_GROUP = "persisters"
+EVAL_RUNNERS_GROUP = "eval-runners"

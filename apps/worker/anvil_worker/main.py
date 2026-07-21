@@ -12,7 +12,10 @@ import redis.asyncio as redis
 from prometheus_client import start_http_server
 
 from .config import get_settings
+from .eval_runner import EvalRunner
+from .graders import load_graders
 from .ingest_consumer import IngestConsumer, run_reaper
+from .providers import load_env
 from .registry import load_pricing_resolvers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -20,20 +23,29 @@ log = logging.getLogger("anvil_worker")
 
 
 async def main() -> None:
+    # Judge/target keys come from the repo-root .env before anything reads them.
+    load_env()
     settings = get_settings()
     start_http_server(settings.metrics_port)
     load_pricing_resolvers()
+    load_graders()
 
     client = redis.from_url(settings.redis_url, decode_responses=True)
     consumer = IngestConsumer(client)
+    evals = EvalRunner(client)
 
-    tasks = [asyncio.create_task(consumer.run()), asyncio.create_task(run_reaper())]
+    tasks = [
+        asyncio.create_task(consumer.run()),
+        asyncio.create_task(run_reaper()),
+        asyncio.create_task(evals.run()),
+    ]
 
     def _request_stop() -> None:
         # Stop reading new work; the in-flight batch finishes and acks, so a
         # clean shutdown leaves nothing pending for reclaim to mop up.
         log.info("shutdown signal received; draining")
         consumer.stop()
+        evals.stop()
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

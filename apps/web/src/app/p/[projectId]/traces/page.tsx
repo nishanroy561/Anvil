@@ -6,6 +6,7 @@ import type { TraceSummary } from "@/lib/types";
 import { DEFAULT_FILTERS, FilterBar, rangeToSince, type Filters } from "@/components/FilterBar";
 import { TracesTable } from "@/components/TracesTable";
 import { EmptyTraces } from "@/components/EmptyTraces";
+import { AddToDataset } from "@/components/evals/AddToDataset";
 import { ErrorNote, Spinner } from "@/components/ui";
 
 function toApiFilters(f: Filters): TraceFilters {
@@ -29,6 +30,7 @@ export default function TracesPage({ params }: { params: { projectId: string } }
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   // Monotonic token: a stale response from an abandoned filter set must not land.
   const fetchSeq = useRef(0);
 
@@ -57,6 +59,7 @@ export default function TracesPage({ params }: { params: { projectId: string } }
 
   useEffect(() => {
     fetchFirstPage(filters);
+    setSelected(new Set()); // a new filter set invalidates the old selection
   }, [filters, fetchFirstPage]);
 
   // 10 s auto-refresh: re-pulls the first page quietly; deeper pages reload on demand.
@@ -105,6 +108,27 @@ export default function TracesPage({ params }: { params: { projectId: string } }
         />
       </header>
 
+      {/* bulk action bar — appears only when something is selected */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 border-b border-ember/30 bg-ember/5 px-4 py-2">
+          <span className="font-mono text-2xs text-ember">
+            {selected.size} selected
+          </span>
+          <AddToDataset
+            projectId={projectId}
+            traceIds={Array.from(selected)}
+            onDone={() => setSelected(new Set())}
+          />
+          <button
+            type="button"
+            onClick={() => setSelected(new Set())}
+            className="cursor-pointer text-2xs text-ink-muted transition-colors duration-150 hover:text-ink"
+          >
+            clear
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="px-4 pt-3">
           <ErrorNote message={error} onRetry={() => fetchFirstPage(filters)} />
@@ -129,6 +153,20 @@ export default function TracesPage({ params }: { params: { projectId: string } }
           hasMore={cursor !== null}
           loadingMore={loadingMore}
           onLoadMore={loadMore}
+          selected={selected}
+          onToggle={(id) =>
+            setSelected((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            })
+          }
+          onToggleAll={() =>
+            setSelected((prev) =>
+              prev.size === traces.length ? new Set() : new Set(traces.map((t) => t.id)),
+            )
+          }
         />
       )}
     </div>

@@ -32,3 +32,8 @@ RECLAIMED_MESSAGES = Counter(
 ABANDONED_TRACES = Counter(
     "anvil_abandoned_traces_total", "Stale in_progress traces marked abandoned"
 )
+
+# Eval runner (Phase 5). Item throughput is the useful signal — a run that
+# stalls mid-batch shows up as a flat counter with the run still `running`.
+EVAL_ITEMS = Counter("anvil_eval_items_total", "Dataset items scored")
+EVAL_RUNS = Counter("anvil_eval_runs_total", "Eval runs reaching a terminal state", ["status"])

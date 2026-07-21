@@ -23,6 +23,7 @@ Every load-bearing decision gets an ADR: short, immutable once accepted, superse
 | [0013](0013-sdk-never-blocks.md) | SDKs never block or crash the host app | Accepted |
 | [0014](0014-worker-owns-its-write-sql.md) | Worker persists via explicit SQL; no dependency on `anvil_api` | Accepted |
 | [0015](0015-sdks-emit-traces-at-completion.md) | SDKs emit a trace once, at completion; no client-side `in_progress` | Accepted |
+| [0016](0016-model-name-picks-the-provider.md) | The configured model name resolves the LLM provider (Anthropic / Google) | Accepted |
 
 ## Template
 

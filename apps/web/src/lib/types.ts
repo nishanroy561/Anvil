@@ -91,6 +91,95 @@ export interface MetricsOverview {
   buckets: TimeBucket[];
 }
 
+// ---- evaluation (Phase 5) -------------------------------------------------
+
+export interface Dataset {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  item_count: number;
+}
+
+export interface DatasetItem {
+  id: string;
+  dataset_id: string;
+  input: unknown;
+  expected_output: unknown;
+  metadata: Record<string, unknown> | null;
+  source_trace_id: string | null;
+}
+
+export type EvalRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface GraderSummary {
+  mean: number | null;
+  pass_rate: number | null;
+  scored_items: number;
+  errored_items: number;
+}
+
+export interface EvalRunSummary {
+  graders: Record<string, GraderSummary>;
+  total_items: number;
+  failed_items: number;
+  total_cost_usd: number;
+  mean_latency_ms: number | null;
+  p95_latency_ms: number | null;
+}
+
+export interface EvalRun {
+  id: string;
+  project_id: string;
+  dataset_id: string;
+  name: string;
+  status: EvalRunStatus;
+  target_config: { mode: string; model?: string | null; prompt?: string | null } | null;
+  grader_config: { graders: { name: string; config: Record<string, unknown> }[] } | null;
+  progress: number;
+  total: number;
+  summary: EvalRunSummary | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface EvalResult {
+  id: string;
+  run_id: string;
+  item_id: string;
+  output: unknown;
+  scores: Record<string, { score?: number; detail?: Record<string, unknown>; error?: string }> | null;
+  judge_reasoning: Record<string, string> | null;
+  latency_ms: number | null;
+  cost_usd: number | null;
+  error: string | null;
+}
+
+export interface GraderInfo {
+  name: string;
+  kind: "deterministic" | "judge";
+  description: string;
+  config_schema: {
+    type: "object";
+    properties?: Record<
+      string,
+      {
+        type?: string;
+        title?: string;
+        description?: string;
+        enum?: string[];
+        default?: unknown;
+        minimum?: number;
+        maximum?: number;
+        items?: { type?: string };
+      }
+    >;
+    required?: string[];
+  };
+}
+
 /** Marker shape ingest leaves behind when a field exceeded the size cap. */
 export interface TruncationMarker {
   anvil_truncated: true;
