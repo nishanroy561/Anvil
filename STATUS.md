@@ -4,7 +4,7 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-20 (Phase 3 session)
+Last updated: 2026-07-21 (Phase 4 session)
 
 ## Where we are
 
@@ -14,10 +14,10 @@ Last updated: 2026-07-20 (Phase 3 session)
 + the 1k-trace worker-kill load test).**
 **Phase 3 (SDKs): DONE — acceptance criteria pass (65 new tests + a live
 API-kill run against the demo app).**
-Phases 4–11: not started (stubs with spec pointers exist).
-
-**Next phase is 4 (dashboard), which is UI — per `CLAUDE.md` you must tell the
-user what you intend to build and get a go-ahead before starting it.**
+**Phase 4 (dashboard): BUILT — data-level acceptance verified over live HTTP;
+the visual pass (waterfall proportions, 100-span jank check) still needs human
+eyes on :3000.** User gave the UI go-ahead this session.
+Phases 5–11: not started (stubs with spec pointers exist).
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -180,6 +180,51 @@ API-death scenarios.
   `ix_traces_project_started` and filters. Phase 11's 50k load test is where the
   trigram path gets verified under scale.
 
+### Phase 4 — what was built and verified (2026-07-21)
+
+- `apps/web` is now the real dashboard (Next.js 14 App Router, dark-only
+  "iron & ember" design system in `tailwind.config.ts`; Space Grotesk display +
+  IBM Plex Mono data faces via `next/font`):
+  - **`/` is a public marketing landing** (not in plan/dashboard.md — added at
+    the user's request, structured after umami.is: centered hero → product
+    frame → six-up feature grid → snippet → footer). Its hero "screenshot" is a
+    live-rendered waterfall using the real span palette, inside browser chrome.
+  - `/login`, `/signup` (session cookie), `src/middleware.ts` cookie gate.
+    Routing: `/` public; signed-in visitors bounce `/` → `/home`; `/home` is
+    the authed redirect to the first project's traces.
+  - Browser → API via the **`/api` rewrite proxy** (next.config.mjs) so the
+    session cookie stays first-party; `WEB_API_BASE_URL` aims the proxy.
+  - `/p/[id]/traces` — virtualized table (@tanstack/react-virtual), filter bar
+    (free text ≥3 chars, time range, status, name, model, metadata k=v),
+    keyset "Load more", 10 s auto-refresh toggle, empty state with the SDK
+    snippet carrying a real key prefix.
+  - `/traces/[id]` — the waterfall: shared tree/timeline rows, machinist ruler,
+    span-type colors, **hot-span ember highlight** (longest closed span),
+    orphan badge, open-ended "still running…"/"abandoned" bars, truncation
+    notices (`anvil_truncated` markers), span panel with prompt-template
+    variable highlighting, retrieval chunk list, error+stack, tokens/cost.
+    Tree assembly in `src/lib/waterfall.ts` tolerates orphans/cycles/negative
+    durations client-side (checklist row 7).
+  - `/p/[id]` overview — 4 stat tiles + traces/errors stacked bars + cost area
+    (recharts). Chart steps validated with the dataviz palette validator
+    against the iron surface (UI status colors were too light; charts use
+    darker `#2EA878/#D5544A/#DE6420`).
+  - `/p/[id]/settings` — project info + API keys (list/create/revoke; full key
+    shown once). Datasets/Evals/Monitors/Alerts are honest phase-labeled stubs.
+- Backend: `TraceSummary` gained `project_id` (list/detail responses) so the
+  detail page can link back; full API suite re-run green (69 passed).
+- Verified over live HTTP (API + worker + `npm run dev`): login → cookie →
+  list → `status=error` filter (3 traces) → detail span tree correct
+  (`rag_pipeline` → retriever/prompt/llm); a synthetic **103-span dirty trace**
+  (nested chains, one error span, one open-ended span, one orphan) ingested and
+  served — detail API 24 ms, page 200 in 64 ms. Overview aggregates correct.
+- **Not yet verified: the visual pass** — waterfall proportions/nesting by eye
+  and the 100-span no-jank check need a human at :3000 (no browser tooling in
+  the build session). `npm run build` is clean.
+- Phase-4 leftovers: "Add to dataset" button is a disabled stub (Phase 5 wires
+  it); feedback column shows "—" until Phase 9; `/v1/ingest/stats` has no
+  session-authed variant so the dashboard doesn't surface ingest stats.
+
 ## What exists
 
 - Root: compose (postgres/redis/api/worker/web + `observability` profile:
@@ -230,16 +275,13 @@ API-death scenarios.
 
 ## Next actions (in order)
 
-1. **Phase 4 — dashboard** (plan/dashboard.md): login, trace list + filters,
-   waterfall detail, overview. **This is UI — stop and tell the user what you
-   intend to build, then wait for a go-ahead**, per the rule in `CLAUDE.md`.
-   Everything it needs already exists and is tested: the read APIs, and two
-   independent data generators — `scripts/loadtest_ingest.py` (bulk, provisions
-   its own tenant) and `examples/demo-rag-app` (`python -m demo seed --n 200`,
-   realistic multi-span traces with errors, a slow tail, mixed models, and
-   `topic`/`channel` metadata to filter on). The demo app is the better source
-   for building the waterfall against, since its traces have real nesting.
-2. Then Phase 5 onward per plan.md's phase table.
+1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
+   proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
+   trace for jank, then commit.
+2. **Phase 5 — datasets & eval engine** (plan/evaluation.md §1–3). The
+   dashboard's "Add to dataset" stub and the Datasets/Evals nav entries are
+   waiting for it.
+3. Then Phase 6 onward per plan.md's phase table.
 
 ### Phase 3 leftovers worth knowing
 
@@ -289,5 +331,9 @@ cd examples/demo-rag-app && python -m demo seed --n 200  # realistic, nested
 ```
 
 A second API key (`ak_68e1067e…`, named `phase3-demo`) was minted on the demo
-project this session. Like the seeded one, treat it as dev-only — revoke it
-rather than reusing it anywhere real.
+project in the Phase-3 session, and a third (`ak_aca613d3…`, `phase4-acceptance`)
+in the Phase-4 session. All are dev-only — revoke rather than reuse.
+
+The demo project now holds **40 traces**: the 39 from Phase 3 plus the
+103-span `acceptance_100_spans` trace (nested chains, one error span, one
+open-ended span) ingested for the Phase-4 waterfall check.

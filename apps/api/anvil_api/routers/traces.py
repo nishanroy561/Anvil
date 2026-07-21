@@ -148,6 +148,7 @@ async def list_traces(
 def _summary(trace: Trace) -> TraceSummary:
     return TraceSummary(
         id=trace.id,
+        project_id=trace.project_id,
         name=trace.name,
         status=trace.status,
         model=trace.model,

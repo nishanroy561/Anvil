@@ -30,6 +30,7 @@ class TraceSummary(BaseModel):
     would dominate the response; the detail endpoint serves them."""
 
     id: uuid.UUID
+    project_id: uuid.UUID
     name: str
     status: str
     model: str | None

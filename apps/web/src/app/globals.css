@@ -1,3 +1,71 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-iron-950 text-ink;
+  }
+
+  ::selection {
+    background: rgba(244, 118, 43, 0.3);
+  }
+
+  /* Keyboard focus is always visible; pointer focus stays quiet. */
+  :focus-visible {
+    outline: 2px solid #f4762b;
+    outline-offset: 1px;
+    border-radius: 2px;
+  }
+
+  /* Thin scrollbars that match the surface, not the OS chrome. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2e3646 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #2e3646;
+    border-radius: 4px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .field {
+    @apply h-8 rounded-md border border-line bg-iron-900 px-2.5 text-[13px] text-ink
+      placeholder:text-ink-faint transition-colors duration-150
+      hover:border-line-strong focus:border-ember focus:outline-none;
+  }
+
+  .btn-ember {
+    @apply inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md
+      bg-ember px-3.5 text-[13px] font-medium text-iron-950 transition-colors
+      duration-150 hover:bg-ember-bright disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-ghost {
+    @apply inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md
+      border border-line bg-transparent px-3 text-[13px] text-ink-muted
+      transition-colors duration-150 hover:border-line-strong hover:text-ink;
+  }
+}
