@@ -4,7 +4,7 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-20 (Phase 2 session)
+Last updated: 2026-07-20 (Phase 3 session)
 
 ## Where we are
 
@@ -12,7 +12,12 @@ Last updated: 2026-07-20 (Phase 2 session)
 **Phase 1 (schema, models, auth): DONE — acceptance criteria pass.**
 **Phase 2 (ingestion pipeline): DONE — acceptance criteria pass (94 tests green
 + the 1k-trace worker-kill load test).**
-Phases 3–11: not started (stubs with spec pointers exist).
+**Phase 3 (SDKs): DONE — acceptance criteria pass (65 new tests + a live
+API-kill run against the demo app).**
+Phases 4–11: not started (stubs with spec pointers exist).
+
+**Next phase is 4 (dashboard), which is UI — per `CLAUDE.md` you must tell the
+user what you intend to build and get a go-ahead before starting it.**
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -40,6 +45,18 @@ matters most at Phase 4.
   spans over real HTTP with the worker SIGKILLed at trace 350 and restarted →
   zero loss, zero duplicates, and list/detail/overview/search all correct.
   Requires the API running; see the script docstring.
+- `cd sdks/python && python -m pytest -q` → **35 passed** (~9 s), no services needed.
+- `cd sdks/typescript && npm install && npm test` → **24 passed** (~1 s); `npx tsc` builds clean.
+- `cd examples/demo-rag-app && python -m pytest -q` → **6 passed** (~34 s; the
+  mock LLM sleeps to make the waterfall look real).
+- **Phase-3 acceptance, run live end to end** against the API + worker:
+  `python -m demo seed --n 25` → all 25 persisted, 0 dropped, correct span tree
+  (`rag_pipeline` → `retriever` / `ChatPromptTemplate` / `<model>`), tokens on
+  the llm span, cost rolled up onto the trace, search/metadata/status/model
+  filters all returning the right counts. Then the API was **killed with the
+  demo app serving traffic**: 6 consecutive `/ask` calls returned 200 at
+  unchanged latency (~0.59 s), traces buffered, and on restart the backlog
+  drained by itself (sent 3→9, dropped 0).
 
 ### Phase 1 test suite (`apps/api/tests/`)
 
@@ -96,6 +113,33 @@ Worker (`apps/worker/tests/`):
   → null (never an error), span-model fallback, roll-ups, latency, and
   `search_text` covering trace name + root payloads but **not** span payloads.
 
+### Phase 3 test suite
+
+Python SDK (`sdks/python/tests/`) — no services, no keys, transport mocked with
+respx and LLMs faked with langchain's test doubles:
+- `test_tracing.py` — span parentage (incl. **concurrent asyncio tasks**, which
+  is what contextvars buys), host exceptions marked *and* re-raised, `@observe`
+  sync + async, manual `start_trace`/`start_span`, double-`end()` no-op,
+  client-side 100 KB truncation (checklist row 6), unserializable values, and
+  the 1000-span cap. Every emitted payload is validated against
+  `packages/shared/trace-schema.json` — the same schema ingest enforces.
+- `test_client.py` — ADR-0013 lives here: batching, drop-oldest with counting,
+  API-down never raising into host code, 5xx retry then success, `Retry-After`,
+  jittered capped backoff, 422 dropped rather than looped, requeue respecting
+  the bound, shutdown with a dead API, and the three `redact` cases (scrub,
+  drop-on-None, **drop-on-raise** — checklist row 15).
+- `test_langchain.py` — chain/retriever/tool/LLM run trees → span trees, error
+  propagation, token usage from both `llm_output` and `usage_metadata`, handler
+  reuse starting a fresh trace, and a deliberately broken handler proving a
+  callback bug costs a span, not the customer's request.
+
+TypeScript SDK (`sdks/typescript/tests/`) — mirrors the Python suite (24 tests),
+validated with Ajv against the same shared schema.
+
+Demo app (`examples/demo-rag-app/tests/`) — multi-span trace shape, error
+traces, the recursive redact hook, seeded-traffic variety, and the two
+API-death scenarios.
+
 ### Known quirks
 
 - `alembic`/`uvicorn`/`pytest` CLIs are not on PATH on this machine (pip user
@@ -120,6 +164,17 @@ Worker (`apps/worker/tests/`):
 - After a worker kill, orphaned entries wait for `reclaim_idle_ms` (60 s) before
   a survivor takes them, so the load test's drain takes ~60 s. That is the
   designed trade-off, not a stall.
+- **SDK `stats()["queued"]` used to under-report.** The count was taken after a
+  batch left the queue and before a failure put it back, so polling during an
+  outage intermittently read 0 while traces were buffered — exactly the number a
+  customer checks to answer "is Anvil losing my data?". Both SDKs now count
+  in-flight traces as queued; regression tests in each. Found by watching the
+  live kill test, not by the unit suite.
+- Ajv's default build is draft-07; the shared schema is draft 2020-12, so the TS
+  tests import `ajv/dist/2020.js`. The default import fails with a confusing
+  "no schema with key or ref .../2020-12/schema".
+- `python -m demo` takes its connection flags on either side of the subcommand
+  (a shared parent parser), because `demo seed --api-key …` is what people type.
 - The trigram index is confirmed usable (`EXPLAIN` shows a Bitmap Index Scan on
   `ix_traces_search_trgm`), but at ~1k rows the planner correctly prefers
   `ix_traces_project_started` and filters. Phase 11's 50k load test is where the
@@ -158,21 +213,50 @@ Worker (`apps/worker/tests/`):
   live provider pricing pages**; check before any cost claim is user-facing.
 - `apps/web`: minimal Next.js 14 App Router + Tailwind page (placeholder until
   Phase 4). `npm install` has NOT been run yet.
-- `sdks/`, `examples/`: stubs with spec pointers only.
+- `sdks/python` (`anvil-sdk` 0.1.0): `_wire.py` (Trace/Span + truncation +
+  redact), `_client.py` (bounded queue, background flusher, backoff),
+  `_tracer.py` (contextvars, `@observe`, manual API), `langchain.py`
+  (`AnvilCallbackHandler`), README. Optional extras: `[langchain]`, `[dev]`.
+- `sdks/typescript` (`@anvil/sdk` 0.1.0): same surface — `wire.ts`, `client.ts`,
+  `tracer.ts` (AsyncLocalStorage), `index.ts`, README. ESM, Node 18+, builds to
+  `dist/` with `tsc`.
+- `examples/demo-rag-app`: FastAPI RAG app (`demo/app.py`) + fake KB
+  (`demo/kb.py`) + mock-by-default LangChain model (`demo/chain.py`) + seeder
+  (`demo/seed.py`) + CLI (`demo/__main__.py`). `DEMO_LLM=real` swaps in a live
+  provider. Seeded models are all in the worker's price table so cost is
+  non-null. Phase 8 adds `--drift` here; Phase 9 adds thumbs-down.
+- `examples/ci-gate`, `examples/plugin-example`, `sdks/` docs beyond the above:
+  stubs with spec pointers only.
 
 ## Next actions (in order)
 
-1. **Phase 3 — SDKs** (plan/sdk.md): Python + TS clients, LangChain callback
-   handler, demo app. ADR-0013 governs: the SDK never blocks or crashes the host
-   app. The wire format they emit is `packages/shared/trace-schema.json`, and
-   `/v1/ingest/traces` now enforces it strictly (`additionalProperties: false`)
-   — an SDK sending an extra field gets a 422, so build against the schema.
-   Checklist rows 6 (client-side truncation) and 15 (`redact` hook) are Phase 3's.
-2. Then Phase 4 (dashboard) — **stop and check with the user before starting UI
-   work**, per the rule in `CLAUDE.md`. The read APIs it needs already exist and
-   are tested; `scripts/loadtest_ingest.py` generates realistic data to build
-   against (it provisions its own tenant and prints the project id).
-3. Then Phase 5 onward per plan.md's phase table.
+1. **Phase 4 — dashboard** (plan/dashboard.md): login, trace list + filters,
+   waterfall detail, overview. **This is UI — stop and tell the user what you
+   intend to build, then wait for a go-ahead**, per the rule in `CLAUDE.md`.
+   Everything it needs already exists and is tested: the read APIs, and two
+   independent data generators — `scripts/loadtest_ingest.py` (bulk, provisions
+   its own tenant) and `examples/demo-rag-app` (`python -m demo seed --n 200`,
+   realistic multi-span traces with errors, a slow tail, mixed models, and
+   `topic`/`channel` metadata to filter on). The demo app is the better source
+   for building the waterfall against, since its traces have real nesting.
+2. Then Phase 5 onward per plan.md's phase table.
+
+### Phase 3 leftovers worth knowing
+
+- **`client.feedback()` is not implemented** in either SDK — it belongs to
+  Phase 9 (evaluation.md §7), which owns the endpoint it would call. The pieces
+  it needs are already in place: `trace.id` is a client-generated UUID exposed
+  on the object and returned by the demo app's `/ask` response.
+- **The eval CLI (`anvil eval run`) is not in the Python SDK yet** — that is
+  Phase 7 (evaluation.md §5), which `plan/sdk.md` §0 notes is hosted here.
+- The TS SDK's tests inject a scripted `fetchImpl` rather than using **msw**,
+  which `plan/sdk.md` §2 suggested. Same coverage, one less dependency, and
+  fully deterministic — but it is a deliberate deviation from the spec doc.
+- The TS SDK is **not published and not wired into any workspace**; there is no
+  root `package.json` referencing it. It builds and tests standalone.
+- `MockChatModel` sleeps (350 ms, ×6 when "slow") to give the waterfall real
+  proportions. That makes `demo seed --n 200` take a few minutes and the demo
+  test suite ~34 s. Lower `latency_ms` if you just need rows in a table.
 
 ### Phase 2 leftovers worth knowing
 
@@ -192,8 +276,18 @@ Postgres/Redis containers may still be running from this session
 (`docker compose ps`; data persists in volumes `anvil_pgdata`/`anvil_redisdata`).
 The seeded API key from this session should be treated as dev-only.
 
-The dev database was left clean: the seeded demo org only, no traces. Load-test
-tenants and their 1k traces were deleted after each run, and the `ingest:traces`
-/ `ingest:dlq` streams were cleared. Regenerate data any time with
-`python scripts/loadtest_ingest.py --traces 1000` (drop `--kill-worker` for a
-plain data load) while the API and a worker are running.
+**The dev database is NOT empty after this session** (it was after Phase 2).
+The demo project holds **39 traces** (36 ok / 3 error) from the Phase-3
+acceptance runs — 25 from `demo seed --n 25` plus 14 from the two API-kill runs. They are realistic
+multi-span traces and are useful for building Phase 4 against, so they were left
+in place deliberately. Delete them if you want a clean slate; regenerate with
+either generator:
+
+```
+python scripts/loadtest_ingest.py --traces 1000          # bulk, own tenant
+cd examples/demo-rag-app && python -m demo seed --n 200  # realistic, nested
+```
+
+A second API key (`ak_68e1067e…`, named `phase3-demo`) was minted on the demo
+project this session. Like the seeded one, treat it as dev-only — revoke it
+rather than reusing it anywhere real.
