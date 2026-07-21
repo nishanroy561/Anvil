@@ -4,7 +4,20 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-21 (Phase 4 session)
+Last updated: 2026-07-22 (UI restyle session)
+
+**UI restyle (2026-07-22, user-directed):** the web app moved from the dark
+"iron & ember" theme to a light neutral system modeled on the user's reference
+(opacity.com): `#F6F6F5` page, white surfaces, near-black Inter type, blue
+`#3B76FF` accent, near-black primary buttons. Token *names* are unchanged
+(iron/ink/line/ember are roles — see `tailwind.config.ts`), so all pages
+restyled via the token remap; span/status/chart palettes were re-picked for
+light backgrounds. Landing page (`app/page.tsx`) rebuilt in the same style
+(pill CTAs, badge eyebrow, dark code card, CTA band) with scroll animation:
+hero elements rise in sequence on load (`.rise`), below-fold sections fade up
+on first viewport entry (`components/Reveal.tsx` + `.reveal`, IntersectionObserver,
+no dependencies, reduced-motion shows everything instantly). Verified in-browser:
+landing, login, traces list, trace waterfall, overview charts.
 
 ## Where we are
 
@@ -17,7 +30,15 @@ API-kill run against the demo app).**
 **Phase 4 (dashboard): BUILT — data-level acceptance verified over live HTTP;
 the visual pass (waterfall proportions, 100-span jank check) still needs human
 eyes on :3000.** User gave the UI go-ahead this session.
-Phases 5–11: not started (stubs with spec pointers exist).
+**Phase 5 (datasets & eval engine): SUBSTANTIALLY DONE, three gaps — see
+"Phase 5 gaps" below. Backend (51 new tests) + UI are built, and the acceptance
+loop ran over live HTTP: promote 10 demo traces → dataset → run with
+valid_json/exact_match/length_bounds/accuracy → live progress → per-item scores
++ summary. But the *judged* half of that criterion has never actually scored:
+this box has no ANTHROPIC_API_KEY, so `accuracy` recorded "no judge key
+configured" ×10 (correctly excluded from means — mean=None, not 0).** User gave
+the Phase 5 UI go-ahead.
+Phases 6–11: not started (stubs with spec pointers exist).
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -225,6 +246,82 @@ API-death scenarios.
   it); feedback column shows "—" until Phase 9; `/v1/ingest/stats` has no
   session-authed variant so the dashboard doesn't surface ingest stats.
 
+### Phase 5 — backend built and verified (2026-07-21)
+
+- **Grader catalog is a shared contract.** `packages/shared/graders.json` is the
+  single source of truth for grader names/kinds/config schemas, vendored into
+  *both* services by `scripts/sync_schemas.py` (same pattern as
+  `trace-schema.json`). The API serves it to drive the UI picker and validate
+  run configs; the worker implements the graders. Neither imports the other
+  (ADR-0014). `test_grader_catalog.py` fails on drift **and** on any
+  catalogued-but-unimplemented (or implemented-but-uncatalogued) grader.
+- `apps/api`: `routers/datasets.py` (CRUD, items, editable expected outputs,
+  `POST /promote` — copies trace payloads, skips foreign/duplicate traces
+  rather than failing the batch) and `routers/eval_runs.py` (create with both
+  spend guards, list/get/results/cancel, `GET /v1/graders`). Enqueues to the
+  new `eval:jobs` stream; a Redis failure leaves the run `queued` for the
+  runner's sweep rather than 500ing.
+- `apps/worker/graders/`: registry + 6 deterministic graders (`valid_json`,
+  `contains`, `not_contains`, `length_bounds`, `exact_match`,
+  `citation_present`) + 4 LLM judges (`accuracy`, `hallucination`, `tone`,
+  `custom`) via LangChain `ChatAnthropic` structured output. Every grader call
+  is timeout-wrapped; a raising or hanging grader costs one score, not the run.
+- `apps/worker/eval_runner.py`: `eval:jobs` consumer group, item snapshot frozen
+  at claim, bounded item concurrency (5), `updated_at` heartbeat + stale-run
+  reclaim, cooperative cancellation between chunks, and `summarize()` applying
+  the aggregation rule (grader-errored items excluded from that grader's mean,
+  counted in `errored_items`).
+- **Price table corrected.** STATUS previously flagged prices as unverified;
+  Claude entries are now verified (Opus 4.8 was listed at $15/$75, actually
+  $5/$25; Haiku 4.5 at $0.80/$4, actually $1/$5). Sonnet 5 ($3/$15) was already
+  right and is the default judge model.
+- Tests: **API 90 passed** (was 69), **worker 76 passed** (was 25). New coverage
+  includes e2e 10-item run, resume-after-kill without duplicates, cancellation,
+  one-item failure not sinking a run, snapshot immunity to mid-run dataset
+  edits, orphan reclaim (and *not* stealing a live run), both spend guards, and
+  cross-tenant 404s on every new route. All keyless — LLMs faked via
+  `GradeContext.model_factory` / `EvalRunner(model_factory=…)`.
+- **Phase 5 UI (same session, after go-ahead):**
+  - `/p/[id]/datasets` — list + create/delete (409 `dataset_in_use` surfaced
+    with a human message); detail page with a table of items, **click-to-edit
+    input/expected-output cells** (JSON-or-text, save/cancel with failure
+    feedback), per-item delete, source-trace links, add-item form, "Run eval"
+    deep link.
+  - `/p/[id]/evals` — run list with live 3 s refresh while anything is
+    queued/running; `/evals/new` — three-step form (dataset → target mode
+    rescore/generate → **grader picker rendered from `GET /v1/graders`**, so
+    plugins appear with zero frontend changes; config forms generated from
+    each grader's JSON Schema); judged-grader cost warning in the sticky
+    submit bar.
+  - `/p/[id]/evals/[runId]` — status, ember progress bar, 2 s poll while live,
+    cancel button, per-grader summary cards (mean/pass-rate/errored), results
+    table with per-grader score columns and expandable rows (judge reasoning,
+    item errors, full output).
+  - **"Add to dataset" wired both ways**: single-trace on the detail page and
+    bulk via checkbox column + action bar on the traces list. One shared
+    `AddToDataset` popover (pick dataset or create inline; shows
+    promoted/skipped counts).
+  - All six pages render 200 through the dev server; `tsc` clean. The
+    dev-only artifacts from this check: dataset `acceptance-golden` (10 items)
+    and run `acceptance-run` in the demo project.
+
+### Phase 5 gaps (do these before calling the phase done)
+
+1. **The live judge path has never executed.** Every judge test injects a fake
+   model through `GradeContext.model_factory`, and the acceptance run had no
+   key, so the real
+   `ChatAnthropic(...).with_structured_output(Verdict).ainvoke()` call has
+   never run once. evaluation.md §2's acceptance names judged `accuracy`
+   explicitly. Set `ANTHROPIC_API_KEY` on the worker and re-run
+   `acceptance-golden` to close this — a bug in `_build_model` would only
+   surface there.
+2. **Judge tracing / dogfooding is not implemented** (evaluation.md §2: judge
+   calls traced with the Anvil Python SDK into a designated internal project).
+   The worker has no `anvil-sdk` dependency and no internal-project config.
+   Deferred deliberately, not half-built.
+3. **No visual pass on the Phase 5 UI** — pages are confirmed to render 200 and
+   typecheck, not to *look* right. Same outstanding item as Phase 4.
+
 ## What exists
 
 - Root: compose (postgres/redis/api/worker/web + `observability` profile:
@@ -277,11 +374,13 @@ API-death scenarios.
 
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
-   trace for jank, then commit.
-2. **Phase 5 — datasets & eval engine** (plan/evaluation.md §1–3). The
-   dashboard's "Add to dataset" stub and the Datasets/Evals nav entries are
-   waiting for it.
-3. Then Phase 6 onward per plan.md's phase table.
+   trace for jank.
+2. **Phase 6 — comparison & stats** (plan/evaluation.md §4):
+   `anvil_api/services/analysis.py` (paired bootstrap + McNemar, intersection
+   of item snapshots, "inconclusive" honesty rule), the compare endpoint, and
+   the `/evals/compare` UI. The item snapshots Phase 5 freezes are the
+   foundation it joins on.
+3. Then Phase 7 onward per plan.md's phase table.
 
 ### Phase 3 leftovers worth knowing
 

@@ -197,7 +197,7 @@ export function Waterfall({
                       background: row.openEnded
                         ? `linear-gradient(90deg, ${color} 0%, transparent 96%)`
                         : color,
-                      outline: isSelected ? "1px solid #E7EBF2" : isHot ? "1px solid #F4762B" : undefined,
+                      outline: isSelected ? "1px solid #131316" : isHot ? "1px solid #3B76FF" : undefined,
                       outlineOffset: 1,
                     }}
                   />

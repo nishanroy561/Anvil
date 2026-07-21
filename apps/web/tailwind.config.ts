@@ -1,10 +1,11 @@
 import type { Config } from "tailwindcss";
 
 /**
- * Anvil "iron & ember" tokens. The dashboard is dark-only by design — it is an
- * observability instrument, not a marketing page. Ember is rationed: primary
- * actions, active nav, and the hot span in the waterfall. Span-type colors are
- * the functional palette and appear only on data.
+ * Anvil neutral tokens. Light, paper-like surfaces with near-black ink and a
+ * single blue accent, rationed to primary emphasis: active nav, the hot span,
+ * focus. Span-type colors are the functional palette and appear only on data.
+ * Token names are roles, not lightnesses: iron-950 is "page", iron-900 is
+ * "surface", iron-850 is "raised/hover", iron-800 is "active".
  */
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
@@ -12,50 +13,52 @@ const config: Config = {
     extend: {
       colors: {
         iron: {
-          950: "#0C0E12", // page
-          900: "#12151C", // surface
-          850: "#181D26", // raised surface / hover
-          800: "#1F2530", // active
+          950: "#F6F6F5", // page
+          900: "#FFFFFF", // surface
+          850: "#EFEFED", // raised surface / hover
+          800: "#E8E8E6", // active
         },
         line: {
-          DEFAULT: "#222835",
-          strong: "#2E3646",
+          DEFAULT: "#E5E5E3",
+          strong: "#D6D6D5",
         },
         ink: {
-          DEFAULT: "#E7EBF2",
-          muted: "#8B95A7",
-          faint: "#5C6678",
+          DEFAULT: "#131316",
+          muted: "#545464",
+          faint: "#72727F", // 4.5:1 on white — timestamps and ticks stay AA
         },
+        // Historically the orange brand accent; now the single blue UI accent.
         ember: {
-          DEFAULT: "#F4762B",
-          bright: "#FF8B42",
-          dim: "#B85A22",
+          DEFAULT: "#3B76FF",
+          bright: "#2563EB", // hover emphasis
+          dim: "#A8C2FF", // tint
         },
         status: {
-          ok: "#3ECF8E",
-          error: "#F06A5D",
-          running: "#4CA9FF",
-          abandoned: "#8B95A7",
+          ok: "#039855",
+          error: "#D92D20",
+          running: "#1570EF",
+          abandoned: "#72727F",
         },
         span: {
-          llm: "#A78BFA",
-          retrieval: "#38BDF8",
-          tool: "#FBBF24",
-          embedding: "#34D399",
-          chain: "#7D8CA3",
-          custom: "#E879B9",
+          llm: "#7C3AED",
+          retrieval: "#1570EF",
+          tool: "#DC6803",
+          embedding: "#039855",
+          chain: "#64748B",
+          custom: "#DD2590",
         },
       },
       fontFamily: {
-        display: ["var(--font-display)", "system-ui", "sans-serif"],
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        display: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       fontSize: {
         "2xs": ["0.6875rem", { lineHeight: "1rem" }], // 11px — labels, ticks
       },
       boxShadow: {
-        ember: "0 0 12px 0 rgba(244, 118, 43, 0.35)",
-        panel: "0 8px 32px rgba(0, 0, 0, 0.45)",
+        ember: "0 0 0 3px rgba(59, 118, 255, 0.18)",
+        panel: "0 1px 2px rgba(19, 19, 22, 0.05), 0 12px 32px rgba(19, 19, 22, 0.08)",
       },
       animation: {
         "pulse-soft": "pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",

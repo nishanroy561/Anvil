@@ -15,17 +15,17 @@ import { formatCost } from "@/lib/format";
 import type { MetricsOverview } from "@/lib/types";
 
 /**
- * Chart steps are darker than the UI status colors on purpose: the dataviz
- * palette validator wants OKLCH L in [0.48, 0.67] against the iron surface.
- * Errors always sit at the base of the stack — position, gaps, and the legend
- * carry identity alongside hue (red/green alone is not enough).
+ * Chart hues sit in the OKLCH L [0.48, 0.67] band against the white surface so
+ * marks stay legible without shouting. Errors always sit at the base of the
+ * stack — position, gaps, and the legend carry identity alongside hue
+ * (red/green alone is not enough).
  */
 const CHART = {
-  ok: "#2EA878",
+  ok: "#039855",
   error: "#D5544A",
-  cost: "#DE6420",
-  grid: "#222835",
-  axis: "#5C6678",
+  cost: "#3B76FF",
+  grid: "#ECECEA",
+  axis: "#72727F",
 };
 
 interface BucketRow {
@@ -126,7 +126,7 @@ export function TracesChart({ metrics }: { metrics: MetricsOverview }) {
           <CartesianGrid stroke={CHART.grid} strokeDasharray="0" vertical={false} />
           <XAxis dataKey="label" {...AXIS_PROPS} interval="preserveStartEnd" minTickGap={32} />
           <YAxis {...AXIS_PROPS} allowDecimals={false} />
-          <Tooltip content={<DarkTooltip />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
+          <Tooltip content={<DarkTooltip />} cursor={{ fill: "rgba(19,19,22,0.04)" }} />
           {/* errors at the base: position encodes identity alongside hue */}
           <Bar dataKey="errors" name="error" stackId="t" fill={CHART.error} radius={[0, 0, 0, 0]} />
           <Bar dataKey="ok" name="ok" stackId="t" fill={CHART.ok} radius={[3, 3, 0, 0]} />
