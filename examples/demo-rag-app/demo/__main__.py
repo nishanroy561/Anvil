@@ -31,6 +31,11 @@ def main(argv=None) -> int:
     seed_cmd = sub.add_parser("seed", help="generate demo traces", parents=[common])
     seed_cmd.add_argument("--n", type=int, default=200)
     seed_cmd.add_argument(
+        "--drift",
+        action="store_true",
+        help="degrade the answers so a monitor's scores fall (Phase 8 demo)",
+    )
+    seed_cmd.add_argument(
         "--delay", type=float, default=0.0, help="seconds between traces"
     )
 
@@ -58,8 +63,8 @@ def main(argv=None) -> int:
     from .seed import seed
 
     anvil.init(api_key=args.api_key, base_url=args.base_url)
-    print(f"seeding {args.n} traces -> {args.base_url}")
-    seed(n=args.n, delay=args.delay)
+    print(f"seeding {args.n}{' degraded' if getattr(args, 'drift', False) else ''} traces -> {args.base_url}")
+    seed(n=args.n, delay=args.delay, drift=getattr(args, 'drift', False))
     anvil.shutdown()
     return 0
 

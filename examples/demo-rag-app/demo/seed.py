@@ -2,8 +2,8 @@
 
 Produces the *varied* traffic the dashboard needs to look real — a mix of
 models, a slice of errors, a slow tail, several sessions and users. Later
-phases extend this file: `--drift` (Phase 8) and thumbs-down feedback
-(Phase 9).
+`--drift` (Phase 8) degrades the answers so a monitor's scores fall; Phase 9
+adds thumbs-down feedback.
 """
 
 from __future__ import annotations
@@ -27,8 +27,16 @@ USERS = [f"user-{i:03d}" for i in range(1, 13)]
 CHANNELS = ["web", "mobile", "api"]
 
 
-def seed(n: int = 200, delay: float = 0.0, verbose: bool = True) -> dict:
-    counts = {"ok": 0, "error": 0, "slow": 0}
+def seed(
+    n: int = 200, delay: float = 0.0, verbose: bool = True, drift: bool = False
+) -> dict:
+    """`drift=True` degrades the answers without raising the error rate.
+
+    That combination is the point: the traces still come back `ok`, still cost
+    money, and still look healthy on the list. Nothing but grading the output
+    notices, which is exactly the failure monitors exist to catch.
+    """
+    counts = {"ok": 0, "error": 0, "slow": 0, "degraded": 0}
 
     for i in range(n):
         question, topic = random.choice(QUESTIONS)
@@ -36,7 +44,7 @@ def seed(n: int = 200, delay: float = 0.0, verbose: bool = True) -> dict:
         fail = random.random() < ERROR_RATE
         slow = not fail and random.random() < SLOW_RATE
 
-        chain = build_chain(model=build_model(model=model, fail=fail, slow=slow))
+        chain = build_chain(model=build_model(model=model, fail=fail, slow=slow, degraded=drift))
         handler = AnvilCallbackHandler(
             trace_name="ask",
             session_id=random.choice(SESSIONS),
@@ -45,12 +53,15 @@ def seed(n: int = 200, delay: float = 0.0, verbose: bool = True) -> dict:
                 "topic": topic,
                 "channel": random.choice(CHANNELS),
                 "seeded": True,
+                "drift": drift,
             },
         )
 
         try:
             chain.invoke(question, config={"callbacks": [handler]})
             counts["slow" if slow else "ok"] += 1
+            if drift:
+                counts["degraded"] += 1
         except Exception as exc:  # the simulated provider failure
             counts["error"] += 1
             if verbose and counts["error"] <= 2:
@@ -65,8 +76,9 @@ def seed(n: int = 200, delay: float = 0.0, verbose: bool = True) -> dict:
     # tail still queued.
     anvil.flush()
     if verbose:
+        drift_note = f", {counts['degraded']} degraded" if drift else ""
         print(
             f"seeded {n} traces: {counts['ok']} ok, {counts['slow']} slow, "
-            f"{counts['error']} error | client stats: {anvil.stats()}"
+            f"{counts['error']} error{drift_note} | client stats: {anvil.stats()}"
         )
     return counts

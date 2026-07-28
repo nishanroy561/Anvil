@@ -7,6 +7,7 @@ round-trip test is what catches it if you forget.
 """
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Integer,
@@ -120,4 +121,66 @@ spans = Table(
     Column("error", Text),
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("ended_at", DateTime(timezone=True)),
+)
+
+# ---- Phase 8: monitors & alerts ---------------------------------------------
+
+monitor_configs = Table(
+    "monitor_configs",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("project_id", Uuid, nullable=False),
+    Column("name", String(256), nullable=False),
+    Column("sample_rate", Numeric(5, 4), nullable=False),
+    Column("grader_config", JSONB),
+    Column("schedule_cron", String(64), nullable=False),
+    Column("enabled", Boolean, nullable=False),
+    Column("last_run_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+monitor_scores = Table(
+    "monitor_scores",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("monitor_id", Uuid, nullable=False),
+    Column("trace_id", Uuid, nullable=False),
+    Column("scores", JSONB),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+alert_rules = Table(
+    "alert_rules",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("project_id", Uuid, nullable=False),
+    Column("name", String(256), nullable=False),
+    Column("metric", String(32), nullable=False),
+    Column("comparison", String(8), nullable=False),
+    Column("threshold", Numeric(14, 6), nullable=False),
+    Column("window_minutes", Integer, nullable=False),
+    Column("enabled", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+alert_events = Table(
+    "alert_events",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("rule_id", Uuid, nullable=False),
+    Column("fired_at", DateTime(timezone=True), nullable=False),
+    Column("value", Numeric(14, 6), nullable=False),
+    Column("resolved_at", DateTime(timezone=True)),
+    Column("notified", Boolean, nullable=False),
+)
+
+projects = Table(
+    "projects",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("org_id", Uuid, nullable=False),
+    Column("name", String(256), nullable=False),
+    Column("slug", String(256)),
+    Column("alert_webhook_url", Text),
+    Column("created_at", DateTime(timezone=True)),
 )

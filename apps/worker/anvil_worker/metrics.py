@@ -37,3 +37,15 @@ ABANDONED_TRACES = Counter(
 # stalls mid-batch shows up as a flat counter with the run still `running`.
 EVAL_ITEMS = Counter("anvil_eval_items_total", "Dataset items scored")
 EVAL_RUNS = Counter("anvil_eval_runs_total", "Eval runs reaching a terminal state", ["status"])
+
+# ---- Phase 8: monitors & alerts ---------------------------------------------
+
+MONITOR_SAMPLES = Counter(
+    "anvil_monitor_samples_total", "Live traces sampled and scored by monitors"
+)
+ALERTS_FIRED = Counter("anvil_alerts_fired_total", "Alert events opened", ["metric"])
+ALERTS_RESOLVED = Counter("anvil_alerts_resolved_total", "Alert events resolved", ["metric"])
+ALERT_DELIVERY_FAILURES = Counter(
+    "anvil_alert_delivery_failures_total",
+    "Alerts that fired but could not be delivered to every channel",
+)

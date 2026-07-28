@@ -47,6 +47,10 @@ class MockChatModel(BaseChatModel):
     latency_ms: int = 350
     fail: bool = False
     slow: bool = False
+    # Phase 8: answers the retrieval never supported. The model still succeeds,
+    # still costs money, still looks healthy on the traces list — which is the
+    # point. Quality drift is invisible to every signal except grading.
+    degraded: bool = False
 
     @property
     def _llm_type(self) -> str:
@@ -72,7 +76,7 @@ class MockChatModel(BaseChatModel):
 
         question = messages[-1].content if messages else ""
         prompt_chars = sum(len(str(m.content)) for m in messages)
-        answer = _canned_answer(str(question))
+        answer = _degraded_answer(str(question)) if self.degraded else _canned_answer(str(question))
         message = AIMessage(
             content=answer,
             usage_metadata={
@@ -83,6 +87,23 @@ class MockChatModel(BaseChatModel):
             },
         )
         return ChatResult(generations=[ChatGeneration(message=message)])
+
+
+DEGRADED_ANSWERS = [
+    "I'm sorry, I don't have that information available right now.",
+    "I'm sorry, I can't help with that. Please contact support.",
+    "I'm sorry, that's outside what I can answer.",
+]
+
+
+def _degraded_answer(question: str) -> str:
+    """A refusal instead of an answer.
+
+    Deliberately not an error: an exception would show up as a red trace and
+    the error-rate alert would catch it. A confident refusal is the drift that
+    only grading can see, which is what makes it worth demonstrating.
+    """
+    return random.choice(DEGRADED_ANSWERS)
 
 
 def _canned_answer(question: str) -> str:
@@ -103,7 +124,7 @@ def _canned_answer(question: str) -> str:
 
 
 def build_model(
-    model: Optional[str] = None, fail: bool = False, slow: bool = False
+    model: Optional[str] = None, fail: bool = False, slow: bool = False, degraded: bool = False
 ) -> BaseChatModel:
     name = model or random.choice(DEMO_MODELS)
     if os.getenv("DEMO_LLM", "mock").lower() == "real":
@@ -113,7 +134,7 @@ def build_model(
             return ChatAnthropic(model=name if name.startswith("claude") else "claude-sonnet-5")
         except ImportError:
             print("DEMO_LLM=real but langchain-anthropic is not installed; using the mock")
-    return MockChatModel(model=name, fail=fail, slow=slow)
+    return MockChatModel(model=name, fail=fail, slow=slow, degraded=degraded)
 
 
 def format_docs(docs: List[Document]) -> str:

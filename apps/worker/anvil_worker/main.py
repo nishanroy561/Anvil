@@ -12,12 +12,15 @@ import redis.asyncio as redis
 from prometheus_client import start_http_server
 
 from . import dogfood
+from .alerter import Alerter
+from .channels import load_channels
 from .config import get_settings
 from .eval_runner import EvalRunner
 from .graders import load_graders
 from .ingest_consumer import IngestConsumer, run_reaper
 from .providers import load_env
 from .registry import load_pricing_resolvers
+from .sampler import Sampler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("anvil_worker")
@@ -30,15 +33,20 @@ async def main() -> None:
     start_http_server(settings.metrics_port)
     load_pricing_resolvers()
     load_graders()
+    load_channels()
 
     client = redis.from_url(settings.redis_url, decode_responses=True)
     consumer = IngestConsumer(client)
     evals = EvalRunner(client)
+    sampler = Sampler()
+    alerter = Alerter()
 
     tasks = [
         asyncio.create_task(consumer.run()),
         asyncio.create_task(run_reaper()),
         asyncio.create_task(evals.run()),
+        asyncio.create_task(sampler.run()),
+        asyncio.create_task(alerter.run()),
     ]
 
     def _request_stop() -> None:
@@ -47,6 +55,8 @@ async def main() -> None:
         log.info("shutdown signal received; draining")
         consumer.stop()
         evals.stop()
+        sampler.stop()
+        alerter.stop()
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

@@ -10,7 +10,7 @@ from redis.exceptions import RedisError
 from .config import get_settings
 from .metrics import DLQ_DEPTH, STREAM_DEPTH
 from .redis_client import get_redis
-from .routers import auth, datasets, eval_runs, health, ingest, projects, traces
+from .routers import auth, datasets, eval_runs, health, ingest, monitors, projects, traces
 from .streams import DLQ_STREAM, TRACES_STREAM
 
 logging.basicConfig(
@@ -73,3 +73,4 @@ app.include_router(ingest.router)
 app.include_router(traces.router)
 app.include_router(datasets.router)
 app.include_router(eval_runs.router)
+app.include_router(monitors.router)
