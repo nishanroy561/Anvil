@@ -15,7 +15,7 @@ from .conftest import requires_services
 pytestmark = requires_services
 
 
-async def test_seed_creates_demo_tenant_on_enterprise_plan(client, capsys):
+async def test_seed_creates_the_demo_tenant(client, capsys):
     await seed()
 
     async with SessionLocal() as session:
@@ -24,8 +24,8 @@ async def test_seed_creates_demo_tenant_on_enterprise_plan(client, capsys):
         project = (await session.execute(select(Project))).scalar_one()
         key = (await session.execute(select(ApiKey))).scalar_one()
 
-    # Enterprise so seeded data and the Phase-11 50k load test never trip the
-    # Free-tier quota (plan/architecture.md §7 step 5).
+    # `plan` is vestigial and unread (ADR-0019); asserted only to pin that the
+    # seed still writes the column the schema declares NOT NULL-with-default.
     assert org.plan == "enterprise"
     assert user.email == DEMO_EMAIL
     assert project.org_id == org.id

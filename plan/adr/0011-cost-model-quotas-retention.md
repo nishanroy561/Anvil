@@ -1,6 +1,11 @@
 # ADR-0011: Cloud cost model — tier quotas + retention windows; batched deletes in v1
 
-Status: Accepted · Date: 2026-07 · Spec: ../pricing.md
+Status: **Superseded by [ADR-0019](0019-fully-open-source-no-commercial-tiers.md)** (2026-07-28) · Date: 2026-07 · Spec: ../retention.md
+
+> Tier quotas and per-plan retention windows are gone with the commercial
+> tiers. The retention mechanism itself survives unchanged — batched deletes
+> with sleeps, partitioning as the scale path — driven by a single global
+> `RETENTION_DAYS` instead of a per-plan window.
 
 ## Context
 Database cost grows linearly with traces. A cloud free tier without ingestion caps and expiry is an unbounded storage liability; retention is the cost lever, quotas are the abuse lever.

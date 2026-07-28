@@ -8,7 +8,7 @@ Anvil monitors its customers' LLM apps; this doc is about monitoring **Anvil its
 
 **API** (`apps/api`): `prometheus-fastapi-instrumentator` exposing `/metrics` — RED metrics per route. Custom series:
 - `anvil_ingest_traces_accepted_total{project}`
-- `anvil_ingest_rejected_total{cause="backpressure"|"rate_limit"|"validation"|"quota"}`
+- `anvil_ingest_rejected_total{cause="backpressure"|"rate_limit"|"validation"}` (the `quota` cause went with the withdrawn pricing model — ADR-0019)
 - `anvil_ingest_truncated_fields_total`, `anvil_ratelimit_rejections_total{scope}`
 - Backlog gauges `anvil_stream_depth` (XLEN) and `anvil_dlq_depth` — **deliberately exported by the API, not the worker**: a dead worker can't report the backlog it isn't draining, and these gauges are exactly what must stay visible in that failure.
 

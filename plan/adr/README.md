@@ -17,8 +17,8 @@ Every load-bearing decision gets an ADR: short, immutable once accepted, superse
 | [0007](0007-fixed-window-rate-limiting.md) | Fixed-window Redis rate limiting, fail-open | Accepted |
 | [0008](0008-small-n-statistics.md) | Paired bootstrap + McNemar with mandatory "inconclusive" verdict | Accepted |
 | [0009](0009-self-observability-metric-ownership.md) | Prometheus/Grafana/OTel; API owns the backlog gauges | Accepted |
-| [0010](0010-open-core-mit.md) | Open core: MIT license, `DEPLOYMENT_MODE` flag, no `ee/` fork | Accepted |
-| [0011](0011-cost-model-quotas-retention.md) | Cloud cost model: tier quotas + retention; batched deletes v1 | Accepted |
+| [0010](0010-open-core-mit.md) | Open core: MIT license, `DEPLOYMENT_MODE` flag, no `ee/` fork | Superseded by 0019 |
+| [0011](0011-cost-model-quotas-retention.md) | Cloud cost model: tier quotas + retention; batched deletes v1 | Superseded by 0019 |
 | [0012](0012-plugin-system.md) | Entry-point plugin system; cloud loads built-ins only | Accepted |
 | [0013](0013-sdk-never-blocks.md) | SDKs never block or crash the host app | Accepted |
 | [0014](0014-worker-owns-its-write-sql.md) | Worker persists via explicit SQL; no dependency on `anvil_api` | Accepted |
@@ -26,6 +26,7 @@ Every load-bearing decision gets an ADR: short, immutable once accepted, superse
 | [0016](0016-model-name-picks-the-provider.md) | The configured model name resolves the LLM provider (Anthropic / Google) | Accepted |
 | [0017](0017-judge-calls-traced-into-an-internal-project.md) | Judge calls are traced into a designated internal project, opt-in via `ANVIL_INTERNAL_API_KEY` | Accepted |
 | [0018](0018-recorded-output-is-kept-apart-from-expected-output.md) | The recorded output is kept in `metadata.recorded_output`, apart from the reference `expected_output` | Accepted |
+| [0019](0019-fully-open-source-no-commercial-tiers.md) | Fully open source: no plans, quotas or hosted tier; Phase 10 becomes retention | Accepted |
 
 ## Template
 

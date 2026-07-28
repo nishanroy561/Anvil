@@ -1,6 +1,11 @@
 # ADR-0010: Open core — MIT license, `DEPLOYMENT_MODE` flag, no `ee/` fork
 
-Status: Accepted · Date: 2026-07 · Spec: ../pricing.md §0
+Status: **Superseded by [ADR-0019](0019-fully-open-source-no-commercial-tiers.md)** (2026-07-28) · Date: 2026-07 · Spec: ../retention.md §0
+
+> Anvil is now fully open source with no hosted tier, so the open-core half of
+> this decision no longer applies. The MIT license and the single-codebase,
+> no-`ee/`-fork rule stand. `DEPLOYMENT_MODE` survives with a narrowed meaning —
+> it gates third-party plugin loading on shared deployments, nothing more.
 
 ## Context
 Positioning follows the Umami pattern: build trust with an open-source core, monetize convenience via a hosted cloud. The trust only materializes if self-hosted Anvil is genuinely complete — feature-gated "community editions" read as bait.

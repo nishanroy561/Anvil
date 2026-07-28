@@ -4,7 +4,42 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-22 (UI restyle session)
+Last updated: 2026-07-28 (Phase 4/5 gap closure + open-source decision)
+
+## 2026-07-28 session
+
+**Anvil is now fully open source — no plans, no quotas, no hosted tier**
+([ADR-0019](plan/adr/0019-fully-open-source-no-commercial-tiers.md), superseding
+0010 and 0011). Phase 10 was rewritten rather than deleted: `plan/pricing.md` →
+`plan/retention.md`, and the phase is now the batched retention worker plus a
+usage panel with no quota bar. Checklist rows 21, 22, 25 and 27 are withdrawn
+(numbers kept — docs cite rows by number); 23 and 24 survive against retention.
+Per-trace LLM cost tracking and the per-run eval spend guards **stay** — they
+report what the operator's own calls cost, which is the product, not billing.
+`DEPLOYMENT_MODE` survives with a narrowed meaning: it gates third-party plugin
+loading on shared deployments and nothing else. `organizations.plan` is
+vestigial and unread; no migration was written to drop it.
+
+**The rescore/expected-output collision is fixed**
+([ADR-0018](plan/adr/0018-recorded-output-is-kept-apart-from-expected-output.md)).
+Promotion copied a trace's output into `expected_output` and nowhere else, and
+rescore then graded `expected_output` itself — so `exact_match` and the
+`accuracy` judge compared a value with itself. That is where every `mean 1.0`
+in the Phase 5 acceptance runs came from; the earlier STATUS text framed it as a
+caveat about reading the numbers, which was wrong — it was a missing field.
+Promotion now writes `metadata.recorded_output` and rescore grades that.
+Pre-ADR items keep the old fallback but their reference-comparing scores come
+back marked `tautological`, surfaced on the summary cards, the score cells and
+the expanded rows. **Existing promoted items are not backfilled** — re-promote
+them, or backfill from `source_trace_id`.
+
+Also closed this session: the three Phase 5 gaps were committed (they had been
+sitting uncommitted), and the two remaining UI defects are fixed — dataset cells
+that clipped mid-JSON now have a show more/less toggle, and a new amber
+`status-warn` token carries the tautology warnings.
+
+**Test counts after this session: API 96, worker 117.** Both suites green with
+Postgres/Redis up; `npx tsc --noEmit` clean in `apps/web`.
 
 **UI restyle (2026-07-22, user-directed):** the web app moved from the dark
 "iron & ember" theme to a light neutral system modeled on the user's reference
@@ -465,10 +500,15 @@ API-death scenarios.
   (pricing resolver registry with the cloud-mode built-ins-only rule),
   `config.py`, `db.py`, `metrics.py` (:9101). `eval_runner`, `sampler`,
   `alerter`, `retention` remain spec-docstring stubs.
-  `pricing.py` has a starter price table — **prices are still unverified against
-  live provider pricing pages**; check before any cost claim is user-facing.
-- `apps/web`: minimal Next.js 14 App Router + Tailwind page (placeholder until
-  Phase 4). `npm install` has NOT been run yet.
+  `pricing.py` is **partly verified**: Anthropic entries were checked against the
+  published list on 2026-07-21 and Google's were added under ADR-0016, but the
+  two OpenAI entries are still marked `# placeholders — verify` in the file.
+  Don't make a user-facing cost claim on a `gpt-4o` trace. (Earlier STATUS text
+  called the whole table unverified in one place and corrected in another;
+  neither was right.)
+- `apps/web`: the full dashboard — see the Phase 4 and Phase 5 sections above
+  for what it contains. (This entry previously described a placeholder page with
+  `npm install` not yet run; that was two phases out of date.)
 - `sdks/python` (`anvil-sdk` 0.1.0): `_wire.py` (Trace/Span + truncation +
   redact), `_client.py` (bounded queue, background flusher, backoff),
   `_tracer.py` (contextvars, `@observe`, manual API), `langchain.py`
@@ -489,11 +529,25 @@ API-death scenarios.
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
    trace for jank.
-2. **Phase 6 — comparison & stats** (plan/evaluation.md §4):
+2. **Prove `mode="generate"` against a real provider.** It is implemented
+   (`eval_runner.py:80`) but has only ever run against `"fake-model"` in unit
+   tests. Phase 6 needs two runs with a known shift, and generate mode is the
+   only way to produce one — rescore over the same dataset gives identical
+   results by construction. Do it cheaply: deterministic graders
+   (`valid_json` / `length_bounds` / `contains`) cost nothing, so only the
+   target generations are billable, and `gemini-2.5-flash-lite` is $0.10/$0.40
+   per Mtok. **Judged comparison is not a prerequisite** — the stats layer does
+   not care where scores come from.
+3. **Phase 6 — comparison & stats** (plan/evaluation.md §4):
    `anvil_api/services/analysis.py` (paired bootstrap + McNemar, intersection
    of item snapshots, "inconclusive" honesty rule), the compare endpoint, and
    the `/evals/compare` UI. The item snapshots Phase 5 freezes are the
-   foundation it joins on.
+   foundation it joins on — verified present and ordered: `eval_runs.item_ids`
+   is frozen at claim (`eval_runner.py:363–377`) and `eval_results` is keyed by
+   `(run_id, item_id)`, so the intersection join needs no prep work.
+   Phase 6 should also refuse to render a verdict when a grader's scores are
+   largely `tautological` (ADR-0018) — a confident zero delta over
+   self-comparisons is exactly the dishonesty the phase exists to prevent.
 3. Then Phase 7 onward per plan.md's phase table.
 
 ### Phase 3 leftovers worth knowing

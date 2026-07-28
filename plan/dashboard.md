@@ -1,6 +1,6 @@
 # Dashboard — Traces & Waterfall UI (Phase 4)
 
-> Part of the [Anvil implementation plan](../plan.md). Read APIs in [ingestion.md](ingestion.md) §5. Eval/dataset UI, monitors UI, and the failure inbox are specified with their subsystems in [evaluation.md](evaluation.md); the Plan & Usage page in [pricing.md](pricing.md).
+> Part of the [Anvil implementation plan](../plan.md). Read APIs in [ingestion.md](ingestion.md) §5. Eval/dataset UI, monitors UI, and the failure inbox are specified with their subsystems in [evaluation.md](evaluation.md); the Usage panel in [retention.md](retention.md).
 
 **Goal:** The core observability UI — login, project switcher, trace list with filters, and an explorable waterfall trace view.
 
