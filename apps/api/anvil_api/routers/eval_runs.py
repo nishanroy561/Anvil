@@ -26,7 +26,9 @@ from ..schemas.evaluation import (
     EvalRunCreate,
     EvalRunOut,
     GraderInfo,
+    RunComparison,
 )
+from ..services.analysis import compare_runs
 from ..services.graders_catalog import builtin_graders, builtin_names
 from ..streams import EVAL_JOBS_STREAM
 
@@ -160,6 +162,67 @@ async def list_eval_runs(
         select(EvalRun).where(*filters).order_by(EvalRun.created_at.desc()).limit(limit)
     )
     return [EvalRunOut.model_validate(r) for r in rows.scalars()]
+
+
+@router.get("/eval-runs/compare", response_model=RunComparison)
+async def compare_eval_runs(
+    a: uuid.UUID = Query(..., description="Baseline run"),
+    b: uuid.UUID = Query(..., description="Run being judged against the baseline"),
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Paired comparison of two runs over the same dataset (ADR-0008).
+
+    Declared **before** `/eval-runs/{run_id}`: FastAPI matches routes in
+    declaration order, and the other way round "compare" is parsed as a run id
+    and 422s.
+    """
+    run_a = await owned_run(a, user, session)
+    run_b = await owned_run(b, user, session)
+
+    if run_a.dataset_id != run_b.dataset_id:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "datasets_differ",
+                "message": (
+                    "These runs scored different datasets, so their items can't be "
+                    "paired. Compare runs over the same dataset."
+                ),
+            },
+        )
+
+    async def _rows(run: EvalRun) -> list[dict]:
+        result = await session.execute(select(EvalResult).where(EvalResult.run_id == run.id))
+        return [
+            {
+                "item_id": r.item_id,
+                "scores": r.scores,
+                "latency_ms": r.latency_ms,
+                "cost_usd": r.cost_usd,
+            }
+            for r in result.scalars()
+        ]
+
+    rows_a, rows_b = await _rows(run_a), await _rows(run_b)
+
+    comparison = compare_runs(
+        {
+            "id": run_a.id,
+            "name": run_a.name,
+            "item_ids": run_a.item_ids,
+            "grader_config": run_a.grader_config,
+        },
+        {
+            "id": run_b.id,
+            "name": run_b.name,
+            "item_ids": run_b.item_ids,
+            "grader_config": run_b.grader_config,
+        },
+        rows_a,
+        rows_b,
+    )
+    return RunComparison(**comparison)
 
 
 @router.get("/eval-runs/{run_id}", response_model=EvalRunOut)

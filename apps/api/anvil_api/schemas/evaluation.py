@@ -147,3 +147,61 @@ class GraderInfo(BaseModel):
     kind: Literal["deterministic", "judge"]
     description: str
     config_schema: dict
+
+
+# ---- comparison (plan/evaluation.md §4, ADR-0008) ---------------------------
+
+
+class GraderComparison(BaseModel):
+    """One grader's paired result across two runs.
+
+    `verdict` is the honest answer and `reason` says why when it is
+    `inconclusive`: `no_paired_scores`, `tautological` (both sides were graded
+    against their own output — ADR-0018), `insufficient_data` (n < 30), or
+    `ci_contains_zero`.
+    """
+
+    grader: str
+    n: int
+    mean_a: float | None
+    mean_b: float | None
+    delta: float | None
+    ci: list[float] | None
+    p_value: float | None
+    significant: bool
+    verdict: Literal["improved", "regressed", "inconclusive"]
+    reason: str | None
+    tautological_pairs: int
+
+
+class RunRef(BaseModel):
+    id: str
+    name: str | None
+    total_items: int
+
+
+class LatencyComparison(BaseModel):
+    a: float | None
+    b: float | None
+    delta: float | None
+    p95_a: float | None
+    p95_b: float | None
+    p95_delta: float | None
+
+
+class CostComparison(BaseModel):
+    a: float
+    b: float
+    delta: float | None
+    mean_a: float | None
+    mean_b: float | None
+
+
+class RunComparison(BaseModel):
+    run_a: RunRef
+    run_b: RunRef
+    compared_items: int
+    partial: bool
+    graders: list[GraderComparison]
+    latency: LatencyComparison
+    cost: CostComparison
