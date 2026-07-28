@@ -18,6 +18,7 @@ dependencies = [
     "jsonschema>=4.22",
     "prometheus-fastapi-instrumentator>=7.0",
     "prometheus-client>=0.20",  # metrics.py declares series directly
+    "numpy>=1.26",  # paired bootstrap in services/analysis.py (ADR-0008)
 ]
 
 [project.optional-dependencies]

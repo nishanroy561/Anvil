@@ -1,7 +1,7 @@
 """Seed the demo org/user/project/API key. Run: python -m anvil_api.seed
 
-Demo org is on plan `enterprise` so demos and load tests never trip
-cloud-mode quotas (plan/architecture.md §7)."""
+The org's `plan` is vestigial — there are no plans, quotas or gates
+(ADR-0019). It is left set rather than churned; nothing reads it."""
 
 import asyncio
 

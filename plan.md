@@ -6,7 +6,7 @@
 
 A multi-tenant platform where engineering teams monitor, test, and debug the LLM features in their products: SDK-instrumented apps stream traces (full execution tree of one AI request) to FastAPI → Redis → Postgres, rendered as a waterfall in a Next.js dashboard; real traces are promoted into datasets and scored by deterministic checks + LLM judges; run comparisons are statistically honest; live traffic is sampled and scored continuously with drift alerts; end-user thumbs-down feedback flows back into datasets. Stack is fixed: FastAPI, PostgreSQL 16, Redis 7, Next.js 14+, Tailwind, LangChain/LangGraph, Pandas/NumPy, Docker (+ Prometheus/Grafana/OTel for self-observability).
 
-**Business model — open core (the Umami pattern):** MIT-licensed, fully featured self-hosted (the default; no caps, no nags); Anvil Cloud runs the same codebase with `DEPLOYMENT_MODE=cloud` and monetizes convenience via Free/Pro/Enterprise tiers. Trust comes from the open core; revenue from hosting. Spec: [pricing §0](plan/pricing.md).
+**Licensing — fully open source:** MIT-licensed and complete. No tiers, no quotas, no feature gating, no hosted offering — every install is the whole product. Per-trace LLM cost tracking and per-run eval spend guards stay: they tell operators what their *own* model calls cost and stop a mistyped loop burning their credits, which is the product rather than billing. Spec: [retention §0](plan/retention.md), [ADR-0019](plan/adr/0019-fully-open-source-no-commercial-tiers.md).
 
 ## Subsystem specs (`plan/`)
 
@@ -17,7 +17,7 @@ A multi-tenant platform where engineering teams monitor, test, and debug the LLM
 | [plan/sdk.md](plan/sdk.md) | Phase 3: Python/TS SDKs, LangChain callback, demo app |
 | [plan/dashboard.md](plan/dashboard.md) | Phase 4: traces list, waterfall, overview, UI ground rules |
 | [plan/evaluation.md](plan/evaluation.md) | Phases 5–9: datasets, graders, job queue, comparison stats, CI gating, monitors/alerts, feedback loop |
-| [plan/pricing.md](plan/pricing.md) | Phase 10: plans, metering, quotas, retention |
+| [plan/retention.md](plan/retention.md) | Phase 10: retention worker, usage rollups |
 | [plan/observability.md](plan/observability.md) | Cross-cutting: Prometheus metrics, OTel tracing, Grafana, alert rules |
 | [plan/plugins.md](plan/plugins.md) | Cross-cutting: extension points (graders, alert channels, pricing), registry contract, isolation, cloud policy |
 | [plan/adr/](plan/adr/README.md) | Architecture Decision Records — the *why* behind every load-bearing choice; read the index before questioning a design |
@@ -40,17 +40,17 @@ Each phase's full steps + tests are in its spec doc; a phase is done when its ac
 | 7 | CI gating | CLI (`anvil eval run`) + example GitHub Action | CLI exit 0 with lenient threshold, exit 1 with strict; workflow documented | [evaluation §5](plan/evaluation.md) |
 | 8 | Monitors & alerts | Scheduled sampling + scoring, drift charts, alert rules + webhook | `--drift` seed fires the alert within one cycle; webhook received | [evaluation §6](plan/evaluation.md) |
 | 9 | Feedback loop | Thumbs-down → trace (race-safe) → failure inbox → dataset | Demo thumbs-down → inbox → promote → next eval includes it | [evaluation §7](plan/evaluation.md) |
-| 10 | Pricing (open core) | Self-hosted unlimited (default); cloud mode: Free/Pro/Enterprise metering, quotas, retention | Cloud: quota 429 at boundary + 80% banner. Self-hosted: same traffic ingests unlimited, zero quota UI. Retention works in both modes | [pricing](plan/pricing.md) |
+| 10 | Retention & housekeeping | Batched retention worker (opt-in via `RETENTION_DAYS`); usage rollups panel | Synthetic 1-day window deletes out-of-window traces in batches; datasets built from them still evaluate; unset `RETENTION_DAYS` deletes nothing | [retention](plan/retention.md) |
 | 11 | Hardening & polish | Prod images, sweeps, load test, docs, demo script | Fresh clone → compose up → seed → full `DEMO.md` walkthrough with no manual fixes | below |
 
-**Order is dependency order.** 0→5 is the critical path; 6–9 are independent after 5 (any order); 10 needs 2 and 5; 11 is last. Time-boxed? The minimum compelling demo is 0–6.
+**Order is dependency order.** 0→5 is the critical path; 6–9 are independent after 5 (any order); 10 needs 2 (traces to expire) and 5 (datasets that must survive expiry); 11 is last. Time-boxed? The minimum compelling demo is 0–6.
 
 ### Phase 11 detail (cross-cutting, so it lives here)
 
 1. Production compose profile: multi-stage Dockerfiles, `next build` standalone, non-root users, healthchecks, worker replicas ×2 (proving the consumer-group design), restart policies.
 2. Sweeps: consistent `{"error": {"code", "message"}}` everywhere; request-ID middleware + structured logs; pagination caps; 404-not-403 for other tenants; **rate-limit sweep** — verify every surface has one (auth, ingest per-key, eval spend guards, feedback) and add a ~240/min per-session backstop on dashboard reads. All limits env-configurable and documented in `.env.example`.
 3. Load test: seed 50k traces; traces list, metrics, free-text search (verify via `EXPLAIN` it hits the trigram index, not a seq scan), and a 100-span waterfall each < 500 ms server-side. Run with the observability profile up — this doubles as [observability.md](plan/observability.md) §4's acceptance (dashboards live, Tempo end-to-end trace, worker-kill alert test).
-4. Rewrite `README.md` as an open-source project front page (what/why, MIT badge, mermaid architecture, **self-host quickstart as the hero path** — `docker compose up` to a full unlimited instance — with Anvil Cloud mentioned as the managed option, SDK snippets, eval + CI walkthrough, screenshots) + per-SDK READMEs.
+4. Rewrite `README.md` as an open-source project front page (what/why, MIT badge, mermaid architecture, **`docker compose up` quickstart as the hero path** — it is the only path, and it yields the whole product — SDK snippets, eval + CI walkthrough, screenshots) + per-SDK READMEs.
 5. Plugin loading ([plugins.md](plan/plugins.md) §5): entry-point discovery, `examples/plugin-example/` (grader + alert channel), `PLUGINS.md` author guide; isolation tests (raising/hanging plugin can't kill a run or worker; cloud mode ignores external plugins).
 6. `DEMO.md`: the 5-minute path — seed → bad trace in waterfall → thumbs-down inbox → promote → two eval variants → comparison verdict → CI gate.
 7. `make test` green across everything.
@@ -102,12 +102,14 @@ Cross-cutting failure modes that **must** be handled; each is specified in the l
 | 18 | Unbounded judge spend | 5 | `MAX_EVAL_ITEMS` + `MAX_CONCURRENT_RUNS` ([evaluation](plan/evaluation.md)) |
 | 19 | Feedback endpoint abuse from end users | 9 | Per-key rate limit ([evaluation](plan/evaluation.md)) |
 | 20 | Ingest worker dies silently, backlog unnoticed | — | API-exported backlog gauges + Prometheus alerts ([observability](plan/observability.md)) |
-| 21 | Free tier as unbounded storage liability | 10 | Monthly quota 429 + tier retention windows ([pricing](plan/pricing.md)) |
-| 22 | Usage-counter drift | 10 | Nightly reconciliation from Postgres ([pricing](plan/pricing.md)) |
-| 23 | Retention DELETE bloats WAL / holds locks | 10 | Batched deletes with sleeps; partitioning as scale path ([pricing](plan/pricing.md)) |
-| 24 | Retention deletes a dataset's source trace | 10 | `source_trace_id ON DELETE SET NULL`; items copy data ([pricing](plan/pricing.md)) |
-| 25 | Downgrade silently destroys data | 10 | Freeze, don't delete; explicit retention warning ([pricing](plan/pricing.md)) |
+| ~~21~~ | ~~Free tier as unbounded storage liability~~ | — | **Withdrawn** — no tiers ([ADR-0019](plan/adr/0019-fully-open-source-no-commercial-tiers.md)) |
+| ~~22~~ | ~~Usage-counter drift~~ | — | **Withdrawn** — no Redis usage counters; rollups recompute from Postgres |
+| 23 | Retention DELETE bloats WAL / holds locks | 10 | Batched deletes with sleeps; partitioning as scale path ([retention](plan/retention.md)) |
+| 24 | Retention deletes a dataset's source trace | 10 | `source_trace_id ON DELETE SET NULL`; items copy data ([retention](plan/retention.md)) |
+| ~~25~~ | ~~Downgrade silently destroys data~~ | — | **Withdrawn** — no plans to downgrade |
 | 26 | Free-text search seq-scans at scale | 1, 2 | Trigram `search_text` + time bound + 3-char min ([ingestion](plan/ingestion.md)) |
-| 27 | Self-hoster hits a quota, plan gate, or upgrade nag | 10 | `DEPLOYMENT_MODE` guard on every gating path; test suite runs in both modes ([pricing](plan/pricing.md)) |
+| ~~27~~ | ~~Self-hoster hits a quota, plan gate, or upgrade nag~~ | — | **Withdrawn** — nothing is gated, so there is nothing to guard |
 | 28 | Broken or hung plugin kills a worker, run, or alert delivery | 2, 5, 8, 11 | Per-call try/except + timeout; failures route through each subsystem's error path ([plugins](plan/plugins.md)) |
-| 29 | Third-party code executing in cloud deployments | 10, 11 | Cloud mode loads built-ins only — `DEPLOYMENT_MODE` checked at plugin discovery ([plugins](plan/plugins.md), ADR-0012) |
+| 29 | Third-party code executing in a shared deployment | 11 | `DEPLOYMENT_MODE=cloud` loads built-ins only, checked at plugin discovery ([plugins](plan/plugins.md), ADR-0012) |
+
+Withdrawn rows keep their numbers — several docs cite rows by number, and renumbering would silently re-point those references.

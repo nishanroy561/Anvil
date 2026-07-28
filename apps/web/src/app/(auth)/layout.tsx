@@ -3,13 +3,13 @@ import { AnvilMark } from "@/components/Brand";
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden px-4">
-      {/* the forge glow: one ember gradient low on the page, nothing else */}
+      {/* one quiet accent gradient low on the page, nothing else */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 bottom-0 h-[45vh]"
         style={{
           background:
-            "radial-gradient(60% 80% at 50% 100%, rgba(244,118,43,0.14) 0%, rgba(244,118,43,0.04) 45%, transparent 75%)",
+            "radial-gradient(60% 80% at 50% 100%, rgba(59,118,255,0.10) 0%, rgba(59,118,255,0.03) 45%, transparent 75%)",
         }}
       />
       <div className="relative w-full max-w-[360px]">

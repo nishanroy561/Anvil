@@ -91,6 +91,150 @@ export interface MetricsOverview {
   buckets: TimeBucket[];
 }
 
+// ---- evaluation (Phase 5) -------------------------------------------------
+
+export interface Dataset {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  item_count: number;
+}
+
+export interface DatasetItem {
+  id: string;
+  dataset_id: string;
+  input: unknown;
+  expected_output: unknown;
+  metadata: Record<string, unknown> | null;
+  source_trace_id: string | null;
+}
+
+export type EvalRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface GraderSummary {
+  mean: number | null;
+  pass_rate: number | null;
+  scored_items: number;
+  errored_items: number;
+  /**
+   * Scores where the graded output *was* the reference it was compared against,
+   * so a perfect score means nothing (ADR-0018). Counted, not excluded — the
+   * score is real, just uninformative. Optional: runs recorded before ADR-0018
+   * have no such field.
+   */
+  tautological_items?: number;
+}
+
+export interface EvalRunSummary {
+  graders: Record<string, GraderSummary>;
+  total_items: number;
+  failed_items: number;
+  total_cost_usd: number;
+  mean_latency_ms: number | null;
+  p95_latency_ms: number | null;
+}
+
+export interface EvalRun {
+  id: string;
+  project_id: string;
+  dataset_id: string;
+  name: string;
+  status: EvalRunStatus;
+  target_config: { mode: string; model?: string | null; prompt?: string | null } | null;
+  grader_config: { graders: { name: string; config: Record<string, unknown> }[] } | null;
+  progress: number;
+  total: number;
+  summary: EvalRunSummary | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface EvalResult {
+  id: string;
+  run_id: string;
+  item_id: string;
+  output: unknown;
+  scores: Record<
+    string,
+    { score?: number; detail?: Record<string, unknown>; error?: string; tautological?: boolean }
+  > | null;
+  judge_reasoning: Record<string, string> | null;
+  latency_ms: number | null;
+  cost_usd: number | null;
+  error: string | null;
+}
+
+/** Why a grader declined to call a result. `null` when it did call one. */
+export type InconclusiveReason =
+  | "no_paired_scores"
+  | "tautological"
+  | "insufficient_data"
+  | "ci_contains_zero";
+
+export interface GraderComparison {
+  grader: string;
+  n: number;
+  mean_a: number | null;
+  mean_b: number | null;
+  delta: number | null;
+  ci: [number, number] | null;
+  p_value: number | null;
+  significant: boolean;
+  verdict: "improved" | "regressed" | "inconclusive";
+  reason: InconclusiveReason | null;
+  tautological_pairs: number;
+}
+
+export interface RunComparison {
+  run_a: { id: string; name: string | null; total_items: number };
+  run_b: { id: string; name: string | null; total_items: number };
+  compared_items: number;
+  /** The snapshots differed, so this compared fewer items than one run scored. */
+  partial: boolean;
+  graders: GraderComparison[];
+  latency: {
+    a: number | null;
+    b: number | null;
+    delta: number | null;
+    p95_a: number | null;
+    p95_b: number | null;
+    p95_delta: number | null;
+  };
+  cost: {
+    a: number;
+    b: number;
+    delta: number | null;
+    mean_a: number | null;
+    mean_b: number | null;
+  };
+}
+
+export interface GraderInfo {
+  name: string;
+  kind: "deterministic" | "judge";
+  description: string;
+  config_schema: {
+    type: "object";
+    properties?: Record<
+      string,
+      {
+        type?: string;
+        title?: string;
+        description?: string;
+        enum?: string[];
+        default?: unknown;
+        minimum?: number;
+        maximum?: number;
+        items?: { type?: string };
+      }
+    >;
+    required?: string[];
+  };
+}
+
 /** Marker shape ingest leaves behind when a field exceeded the size cap. */
 export interface TruncationMarker {
   anvil_truncated: true;

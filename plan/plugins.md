@@ -2,7 +2,7 @@
 
 > Part of the [Anvil implementation plan](../plan.md). Decision record: [ADR-0012](adr/0012-plugin-system.md). Registries are built with their subsystems (phases noted below); discovery + example plugin + author docs land in Phase 11.
 
-**Why:** Anvil is open-core ([pricing.md](pricing.md) §0). Self-hosters who can't extend the platform fork it, and a fork is the failure mode of the whole model. The highest-leverage extension points for an LLM observability platform are graders, alert channels, and model pricing — so those are the v1 plugin surface. Deliberately nothing else (no UI plugins, no ingestion transforms) — small surface, honored contract.
+**Why:** Anvil is fully open source ([ADR-0019](adr/0019-fully-open-source-no-commercial-tiers.md)). Operators who can't extend the platform fork it, and every fork is a user the project stopped serving. The highest-leverage extension points for an LLM observability platform are graders, alert channels, and model pricing — so those are the v1 plugin surface. Deliberately nothing else (no UI plugins, no ingestion transforms) — small surface, honored contract.
 
 ## 1. Extension points
 
@@ -29,7 +29,7 @@
 
 ## 4. Cloud policy
 
-**Cloud mode loads built-ins only** (checked via `DEPLOYMENT_MODE`, same flag as [pricing.md](pricing.md) §0). Running arbitrary tenant Python server-side is a security boundary we do not cross in v1 — no sandbox, no marketplace. The plugin system serves self-hosters and our own modules; a curated/marketplace or WASM-sandboxed story is explicitly future work ([ADR-0012](adr/0012-plugin-system.md)).
+**`DEPLOYMENT_MODE=cloud` loads built-ins only** — meaning any shared, multi-tenant deployment, not a commercial offering ([ADR-0019](adr/0019-fully-open-source-no-commercial-tiers.md)). Running arbitrary tenant Python server-side is a security boundary we do not cross in v1 — no sandbox, no marketplace. The plugin system serves single-tenant operators and the built-in modules; a curated/marketplace or WASM-sandboxed story is explicitly future work ([ADR-0012](adr/0012-plugin-system.md)).
 
 ## 5. Phase 11 deliverables
 

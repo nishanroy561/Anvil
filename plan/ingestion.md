@@ -19,7 +19,7 @@ Two separate mechanisms, both returning `429` + `Retry-After` (SDKs buffer/retry
 
 - **Global backpressure (protects Anvil):** cap stream length with `XADD MAXLEN ~ 100000`; before adding, if `XLEN > HIGH_WATER` (default 80k) → 429. The 20k gap between high-water and MAXLEN is headroom so approximate trimming never eats unprocessed entries.
 - **Per-key rate limit (protects other tenants — noisy-neighbor guard):** reuse the architecture.md rate-limit dependency scoped per API key: default 300 ingest requests/min **and** 5,000 traces/min per key (env-configurable; generous enough that a legit app never hits them). Without this, one buggy client in a tight loop fills the shared stream and every other tenant queues behind it — global backpressure alone punishes the innocent.
-- A third 429 cause, `quota_exceeded` (monthly plan quota), is added by [pricing.md](pricing.md) and checked here before `XADD`.
+- There are only two 429 causes. A third, `quota_exceeded`, was specified by the withdrawn pricing model and is **not** built ([ADR-0019](adr/0019-fully-open-source-no-commercial-tiers.md)).
 
 Track accepts/rejects (per cause, per key) via Redis counters exposed at `/v1/ingest/stats` so a throttled customer is diagnosable — and export every counter/gauge in this doc as a Prometheus metric per [observability.md](observability.md), built at the same time as the feature.
 

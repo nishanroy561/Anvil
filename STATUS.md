@@ -4,7 +4,80 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-21 (Phase 4 session)
+Last updated: 2026-07-28 (Phase 4/5 gap closure + open-source decision)
+
+## 2026-07-28 session
+
+**Anvil is now fully open source — no plans, no quotas, no hosted tier**
+([ADR-0019](plan/adr/0019-fully-open-source-no-commercial-tiers.md), superseding
+0010 and 0011). Phase 10 was rewritten rather than deleted: `plan/pricing.md` →
+`plan/retention.md`, and the phase is now the batched retention worker plus a
+usage panel with no quota bar. Checklist rows 21, 22, 25 and 27 are withdrawn
+(numbers kept — docs cite rows by number); 23 and 24 survive against retention.
+Per-trace LLM cost tracking and the per-run eval spend guards **stay** — they
+report what the operator's own calls cost, which is the product, not billing.
+`DEPLOYMENT_MODE` survives with a narrowed meaning: it gates third-party plugin
+loading on shared deployments and nothing else. `organizations.plan` is
+vestigial and unread; no migration was written to drop it.
+
+**The rescore/expected-output collision is fixed**
+([ADR-0018](plan/adr/0018-recorded-output-is-kept-apart-from-expected-output.md)).
+Promotion copied a trace's output into `expected_output` and nowhere else, and
+rescore then graded `expected_output` itself — so `exact_match` and the
+`accuracy` judge compared a value with itself. That is where every `mean 1.0`
+in the Phase 5 acceptance runs came from; the earlier STATUS text framed it as a
+caveat about reading the numbers, which was wrong — it was a missing field.
+Promotion now writes `metadata.recorded_output` and rescore grades that.
+Pre-ADR items keep the old fallback but their reference-comparing scores come
+back marked `tautological`, surfaced on the summary cards, the score cells and
+the expanded rows. **Existing promoted items are not backfilled** — re-promote
+them, or backfill from `source_trace_id`.
+
+Also closed this session: the three Phase 5 gaps were committed (they had been
+sitting uncommitted), and the two remaining UI defects are fixed — dataset cells
+that clipped mid-JSON now have a show more/less toggle, and a new amber
+`status-warn` token carries the tautology warnings.
+
+**Phase 6 backend is built and its acceptance passes** (see the Phase 6 section
+below). The `/evals/compare` UI is the remaining half and is **awaiting the
+user's go-ahead**.
+
+**Two gaps closed while running the acceptance:**
+
+1. **`mode="generate"` has now executed against a real provider.** It had only
+   ever run against `"fake-model"` in unit tests. A 3-item run against
+   `gemini-2.5-flash` produced output on 3/3 items, cost `0.000593` through the
+   normal price table. Two things learned: **`gemini-2.5-flash-lite` is retired
+   for new API users** (404 `NOT_FOUND`, "no longer available to new users") —
+   it is still in `pricing.py`, correctly, since existing users keep it, but do
+   not reach for it as the cheap default. And the model wrapped its JSON in
+   markdown fences, so `valid_json` scored 0.0 — the grader is right and the
+   model is the problem, which is a fair advertisement for the product.
+2. **The API never validated grader configs**, despite
+   `services/graders_catalog.py` documenting that it did. Found by falling into
+   it: the acceptance script passed `{"text": ...}` where `contains` wants
+   `{"value": ...}`, and an empty needle matches every string, so **both runs
+   completed with a confident `mean 1.0` having measured nothing**. That is the
+   worst failure shape this product has — a silent pass. `POST /v1/eval-runs`
+   now validates each builtin grader's config against the catalog's JSON Schema
+   and 400s `invalid_grader_config`. Unknown graders stay unvalidated (they may
+   be worker-side plugins the API cannot see).
+
+**Test counts after this session: API 128, worker 117.** Both suites green with
+Postgres/Redis up; `npx tsc --noEmit` clean in `apps/web`.
+
+**UI restyle (2026-07-22, user-directed):** the web app moved from the dark
+"iron & ember" theme to a light neutral system modeled on the user's reference
+(opacity.com): `#F6F6F5` page, white surfaces, near-black Inter type, blue
+`#3B76FF` accent, near-black primary buttons. Token *names* are unchanged
+(iron/ink/line/ember are roles — see `tailwind.config.ts`), so all pages
+restyled via the token remap; span/status/chart palettes were re-picked for
+light backgrounds. Landing page (`app/page.tsx`) rebuilt in the same style
+(pill CTAs, badge eyebrow, dark code card, CTA band) with scroll animation:
+hero elements rise in sequence on load (`.rise`), below-fold sections fade up
+on first viewport entry (`components/Reveal.tsx` + `.reveal`, IntersectionObserver,
+no dependencies, reduced-motion shows everything instantly). Verified in-browser:
+landing, login, traces list, trace waterfall, overview charts.
 
 ## Where we are
 
@@ -17,7 +90,16 @@ API-kill run against the demo app).**
 **Phase 4 (dashboard): BUILT — data-level acceptance verified over live HTTP;
 the visual pass (waterfall proportions, 100-span jank check) still needs human
 eyes on :3000.** User gave the UI go-ahead this session.
-Phases 5–11: not started (stubs with spec pointers exist).
+**Phase 5 (datasets & eval engine): SUBSTANTIALLY DONE, three gaps — see
+"Phase 5 gaps" below. Backend (51 new tests) + UI are built, and the acceptance
+loop ran over live HTTP: promote 10 demo traces → dataset → run with
+valid_json/exact_match/length_bounds/accuracy → live progress → per-item scores
++ summary. The *judged* half of that criterion scored nothing at the time —
+`accuracy` recorded "no judge key configured" ×10 (correctly excluded from
+means — mean=None, not 0). As of 2026-07-24 the live judge call is proven
+against Gemini at the unit level; the judged full-stack rerun is still to do.
+See "Phase 5 gaps" #1.** User gave the Phase 5 UI go-ahead.
+Phases 6–11: not started (stubs with spec pointers exist).
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -170,6 +252,15 @@ API-death scenarios.
   customer checks to answer "is Anvil losing my data?". Both SDKs now count
   in-flight traces as queued; regression tests in each. Found by watching the
   live kill test, not by the unit suite.
+- **The Gemini free tier is small enough to hit inside one eval run.** A second
+  10-item judged run on the same day died partway with `RESOURCE_EXHAUSTED`
+  (`generate_content_free_tier_requests`), ~16 calls in. Handled correctly and
+  worth seeing: 429 is retryable, the backoff exhausted, 4 items recorded
+  grader errors, the run still **completed**, and the aggregation rule excluded
+  them (`mean 1.0` over `scored_items 6`, `errored_items 4`) rather than
+  averaging zeros. Budget for it when planning Phase 6's two-run comparison —
+  that needs ~2× the judged calls and will not fit in a free-tier day alongside
+  other runs.
 - Ajv's default build is draft-07; the shared schema is draft 2020-12, so the TS
   tests import `ajv/dist/2020.js`. The default import fails with a confusing
   "no schema with key or ref .../2020-12/schema".
@@ -225,6 +316,248 @@ API-death scenarios.
   it); feedback column shows "—" until Phase 9; `/v1/ingest/stats` has no
   session-authed variant so the dashboard doesn't surface ingest stats.
 
+### Phase 5 — backend built and verified (2026-07-21)
+
+- **Grader catalog is a shared contract.** `packages/shared/graders.json` is the
+  single source of truth for grader names/kinds/config schemas, vendored into
+  *both* services by `scripts/sync_schemas.py` (same pattern as
+  `trace-schema.json`). The API serves it to drive the UI picker and validate
+  run configs; the worker implements the graders. Neither imports the other
+  (ADR-0014). `test_grader_catalog.py` fails on drift **and** on any
+  catalogued-but-unimplemented (or implemented-but-uncatalogued) grader.
+- `apps/api`: `routers/datasets.py` (CRUD, items, editable expected outputs,
+  `POST /promote` — copies trace payloads, skips foreign/duplicate traces
+  rather than failing the batch) and `routers/eval_runs.py` (create with both
+  spend guards, list/get/results/cancel, `GET /v1/graders`). Enqueues to the
+  new `eval:jobs` stream; a Redis failure leaves the run `queued` for the
+  runner's sweep rather than 500ing.
+- `apps/worker/graders/`: registry + 6 deterministic graders (`valid_json`,
+  `contains`, `not_contains`, `length_bounds`, `exact_match`,
+  `citation_present`) + 4 LLM judges (`accuracy`, `hallucination`, `tone`,
+  `custom`) via LangChain `ChatAnthropic` structured output. Every grader call
+  is timeout-wrapped; a raising or hanging grader costs one score, not the run.
+- `apps/worker/eval_runner.py`: `eval:jobs` consumer group, item snapshot frozen
+  at claim, bounded item concurrency (5), `updated_at` heartbeat + stale-run
+  reclaim, cooperative cancellation between chunks, and `summarize()` applying
+  the aggregation rule (grader-errored items excluded from that grader's mean,
+  counted in `errored_items`).
+- **Price table corrected.** STATUS previously flagged prices as unverified;
+  Claude entries are now verified (Opus 4.8 was listed at $15/$75, actually
+  $5/$25; Haiku 4.5 at $0.80/$4, actually $1/$5). Sonnet 5 ($3/$15) was already
+  right and is the default judge model.
+- Tests: **API 90 passed** (was 69), **worker 76 passed** (was 25). New coverage
+  includes e2e 10-item run, resume-after-kill without duplicates, cancellation,
+  one-item failure not sinking a run, snapshot immunity to mid-run dataset
+  edits, orphan reclaim (and *not* stealing a live run), both spend guards, and
+  cross-tenant 404s on every new route. All keyless — LLMs faked via
+  `GradeContext.model_factory` / `EvalRunner(model_factory=…)`.
+- **Phase 5 UI (same session, after go-ahead):**
+  - `/p/[id]/datasets` — list + create/delete (409 `dataset_in_use` surfaced
+    with a human message); detail page with a table of items, **click-to-edit
+    input/expected-output cells** (JSON-or-text, save/cancel with failure
+    feedback), per-item delete, source-trace links, add-item form, "Run eval"
+    deep link.
+  - `/p/[id]/evals` — run list with live 3 s refresh while anything is
+    queued/running; `/evals/new` — three-step form (dataset → target mode
+    rescore/generate → **grader picker rendered from `GET /v1/graders`**, so
+    plugins appear with zero frontend changes; config forms generated from
+    each grader's JSON Schema); judged-grader cost warning in the sticky
+    submit bar.
+  - `/p/[id]/evals/[runId]` — status, ember progress bar, 2 s poll while live,
+    cancel button, per-grader summary cards (mean/pass-rate/errored), results
+    table with per-grader score columns and expandable rows (judge reasoning,
+    item errors, full output).
+  - **"Add to dataset" wired both ways**: single-trace on the detail page and
+    bulk via checkbox column + action bar on the traces list. One shared
+    `AddToDataset` popover (pick dataset or create inline; shows
+    promoted/skipped counts).
+  - All six pages render 200 through the dev server; `tsc` clean. The
+    dev-only artifacts from this check: dataset `acceptance-golden` (10 items)
+    and run `acceptance-run` in the demo project.
+
+### Phase 5 gaps (do these before calling the phase done)
+
+1. ~~**The live judge path has never executed.**~~ **CLOSED — and this gap's
+   text was already stale when written.** The eval-run history in the dev DB
+   shows the judge ran live on **2026-07-21**, in the Phase 5 session itself:
+   `judged-acceptance (gemini)` (18:09, `gemini-2.5-flash`, 7 scored / 3
+   errored, cost 0.0) and `judged-acceptance v2 (budget+cost)` (18:15, 7 scored
+   / 3 errored, **cost 0.004256**). The run that gap #1 actually described is
+   the earlier `acceptance-run` (16:22), whose `accuracy` config named **no
+   model** — so ADR-0016's fixed order resolved it to the box's dead Anthropic
+   key and all 10 items errored. The conclusion drawn from it ("the real
+   `ainvoke()` has never run once") was wrong by the end of that same session,
+   and nobody corrected it. **Check the run history before trusting a claim
+   like this again.**
+   Re-verified 2026-07-24 anyway, which was worth doing for the two pieces the
+   Jul 21 runs don't evidence. A keyless-path unit check with no `model_factory`
+   injected — `build_chat_model → with_structured_output(Verdict,
+   include_raw=True) → ainvoke()` through `run_grader("accuracy", …)` — scored
+   a matching answer 1.0 and a contradicting one 0.0, which is the only
+   evidence anywhere that the judge *discriminates* rather than returning a
+   constant. And a full-stack run (`judged-acceptance-1784852084`, id
+   `d2ed23c7`) completed 10/10 with `errored_items 0` and `total_cost_usd
+   0.006571`.
+   **Read those 1.0 means with care:** they are `rescore` runs over promoted items, so
+   `expected_output` was copied from the very output being graded and a perfect
+   score is near-tautological. They demonstrate the *pipeline*, not judge
+   quality. The discrimination evidence is the smoke test above (1.0 vs 0.0),
+   not any of these runs. A run that would genuinely exercise judgement needs
+   either `mode="generate"` against a real target model or hand-edited expected
+   outputs — worth doing when Phase 6 needs two runs that actually differ.
+   Note when configuring any judged run: both keys are set in `.env`, and
+   ADR-0016's fixed order puts Anthropic first, so a judge with **no model
+   named** resolves to the dead Anthropic key and reproduces the original gap.
+   Name `gemini-2.5-flash` explicitly.
+   Prereq now in place: `apps/worker/pyproject.toml` gained a `[judges]` extra
+   (`langchain-anthropic`, `langchain-google-genai`, `python-dotenv`) — the
+   provider packages were previously not declared anywhere and so were
+   uninstallable; `.env.example` documented a nonexistent `OPENAI_API_KEY` and
+   omitted `GOOGLE_API_KEY`. Both fixed.
+2. ~~**Judge tracing / dogfooding is not implemented.**~~ **Done 2026-07-24 —
+   see ADR-0017.** `apps/worker/anvil_worker/dogfood.py` traces every judge call
+   through the Anvil Python SDK into the project named by
+   `ANVIL_INTERNAL_API_KEY` (`ANVIL_INTERNAL_BASE_URL` aims it). Opt-in: unset
+   is the default and does nothing, so the keyless suite and a bare checkout are
+   unaffected. Shape is one trace per judge call, `judge:<grader>`, wrapping one
+   `llm` span named after the model — tokens live on spans, so the two levels
+   are what make judge spend visible at all. The trace covers the whole call
+   *including retries*. A dedicated `AnvilClient` is passed explicitly rather
+   than `anvil.init()`, so nothing else in the worker can accidentally ship.
+   Every failure path (no SDK, construction raising, SDK raising, dead API)
+   degrades to an inert recorder — 12 tests in `tests/test_dogfood.py` pin that
+   telemetry can never change a score.
+   **Verified live**, not just unit-tested: a judged run against the new
+   `Anvil Internal` project produced 10 `judge:accuracy` traces whose statuses
+   matched the run exactly (6 ok / 4 errored), carrying the prompt, the verdict,
+   the provider's own 429 text on the failures, and on the successes
+   `total_tokens 190/245` → `total_cost_usd 0.000669` through the normal
+   `derive.py` roll-up.
+   Note: `anvil-sdk` is imported lazily and is *not* a declared worker
+   dependency — it is unpublished and installs in-tree
+   (`pip install -e sdks/python`). A key set with no SDK present logs a warning
+   rather than failing silently.
+3. **Visual pass done 2026-07-24** (Chrome, signed in as the demo user), for
+   both the Phase 4 leftover and the Phase 5 pages. **Awaiting the user's own
+   sign-off** — this was an agent's eyes, not a human's.
+
+   **Phase 4 acceptance criterion passes.** On the 103-span
+   `acceptance_100_spans` trace: proportions correct (`stage_0` at 11.00 s ends
+   exactly on the 12 s gridline, `stage_1` starts there, `chain_*_9` at 6.50 s
+   is visibly ~⅗ of an 11 s bar), nesting/indentation correct, the five span
+   types colour-distinct, duration labels flipping to the left of bars near the
+   right edge, and **no jank** scrolling the full 103 rows. `background_flush`
+   renders "still running…" with a fading gradient; the span panel shows type,
+   id, timing, input and output.
+
+   **Phase 5 pages read well.** The eval-run detail is the strongest: summary
+   cards show `1.00` *and* `4 errored` in red side by side rather than hiding
+   failures, errored rows carry ~38 s latency (visibly the retry backoff), and
+   expanding a scored row shows judge reasoning plus pretty-printed full output.
+
+   Four defects found. **(a), (b) and (c) are fixed and verified; (d) is
+   logged.**
+
+   a. **FIXED.** *The orphan badge could never render for ingested data.*
+      `waterfall.ts:64`
+      sets `orphan` only when `parent_span_id` is *set but unresolvable*, while
+      Phase 2 ingest normalization **nulls dangling parents** before storage
+      (`test_normalize.py`). Verified on the acceptance trace: the deliberately
+      orphaned `orphaned_callback` span arrives with `parent_span_id=None`, so
+      it renders as a plain root with no badge. Two individually correct
+      behaviours cancelling out — the server repairs the damage and destroys the
+      evidence, so "had a parent we never saw" is indistinguishable from "is a
+      root". Fixed on the ingest side, where the information still exists:
+      `normalize.py` now sets `anvil_orphaned` on the span's attributes as it
+      nulls the link (same convention as `anvil_clock_adjusted`), and
+      `waterfall.ts` badges on that flag *or* the original client-side check —
+      so payloads that bypass normalization keep working. Three tests in
+      `test_normalize.py` cover dangling, self- and cyclic parents plus the
+      case that matters most: a **genuine root is not marked**, or the badge
+      cries wolf on every trace. Verified end to end with a freshly ingested
+      `orphan_badge_check` trace — the badge appears on `lost_parent_span` and
+      on neither the real root nor its valid child.
+   b. **FIXED.** *Grader-level errors were unreachable in the UI.* In
+      `evals/[runId]/page.tsx:60`, `hasDetail` counted only `result.error` (the
+      *item* failed) and judge reasoning — not `result.scores[name].error` (a
+      *grader* failed). So the four 429-failed rows get no chevron and don't
+      expand, and the expanded panel (lines 104–135) has no branch to render
+      grader errors anyway. The provider's message survived only as a `title`
+      tooltip on the `err` cell — a ~400-char error in a native tooltip, i.e.
+      the most diagnostic thing in the run was the hardest thing to read.
+      `hasDetail` now also counts `scores[*].error`, and the expanded panel
+      renders each as "<grader> — grader error". Verified: the four 429 rows
+      expand and show the full `RESOURCE_EXHAUSTED` text.
+   c. **FIXED** (folded into b). Result rows expanded via `onClick` on a bare
+      `<tr>` — no role, `tabIndex`, or key handler, so the only route to a
+      judge's reasoning was invisible to the accessibility tree and unusable by
+      keyboard. Now `role="button"`, `tabIndex`, `aria-expanded`, and
+      Enter/Space.
+   d. **Open (cosmetic):** dataset detail clips expected-output cells mid-JSON
+      with no "show more" affordance. Left for a polish pass.
+
+### Phase 6 — comparison & stats (2026-07-28)
+
+**Backend done; acceptance passes. UI not started (needs go-ahead).**
+
+- `apps/api/anvil_api/services/analysis.py` — pure functions over dicts, no ORM
+  and no I/O, which is what lets the tests use hand-computed fixtures. Paired
+  bootstrap (10k resamples, fixed seed so a page refresh doesn't move the
+  interval), exact McNemar over discordant pairs for graders whose scores are
+  all 0/1, latency and cost deltas. In the API because compare is synchronous
+  and the API must not import from `apps/worker` (ADR-0014).
+- **The refusals are the substance.** A grader returns `inconclusive` with a
+  `reason` for: `no_paired_scores`, `insufficient_data` (n < 30),
+  `ci_contains_zero`, and `tautological` (both sides graded against their own
+  output — ADR-0018; a zero delta there would report "no regression" when
+  nothing was measured). Grader errors drop the pair rather than scoring 0, so
+  a provider timeout can't invent a regression.
+- `GET /v1/eval-runs/compare?a=&b=` — **declared before `/eval-runs/{run_id}`**;
+  FastAPI matches in declaration order and the other way round parses "compare"
+  as a run id and 422s. There is a regression test pinning this. Runs over
+  different datasets 400 `datasets_differ`; other tenants 404.
+- `numpy` is a new API dependency. **pandas deliberately is not** — the spec's
+  "(Pandas/NumPy)" is a toolset note, and this is vectorized array math with no
+  dataframe in it. Same class of deliberate deviation as the TS SDK's
+  `fetchImpl` over msw.
+- Tests: 28 new (`test_analysis.py` 18, `test_compare.py` 10). Includes the
+  n < 30 boundary at 29/30, noise straddling zero, a run compared with itself
+  reading `inconclusive` rather than "no regression", McNemar against
+  hand-computed values (`2·11/1024`, `2/2³`), and CI reproducibility.
+- **Acceptance: `python scripts/compare_acceptance.py` → PASSED**, against a
+  live API + worker. n=40 real shift → `regressed`, delta −1.0, CI [−1.0, −1.0],
+  p = 1.82e-12 (= 2/2⁴⁰, hand-checkable); the same shift at n=5 →
+  `inconclusive` / `insufficient_data`, p = 0.0625 (= 2/2⁵); a run against
+  itself → `inconclusive`. **No judge credits spent** — the shift is built from
+  the deterministic `contains` grader, since the statistics don't care where
+  scores come from.
+
+**Phase 6 UI (same session, after go-ahead) — built and checked in Chrome:**
+
+- `/p/[id]/evals/compare?a=&b=` — verdict banner (one plain-language sentence
+  per grader), per-grader table (mean A/B, delta, 95% CI, p, n, verdict chip,
+  and a `status-warn` note where any pairs were tautological), latency and cost
+  cards, and a per-item diff showing only rows whose score changed, both
+  outputs side by side with judge reasoning.
+- **The banner never leads with a percentage when the verdict is
+  inconclusive** — that is ADR-0008's requirement, not a style preference.
+  Verified on screen: the n=5 comparison reads "contains: not enough data to
+  call it — 5 items compared, and it takes at least 30 before a difference this
+  size can be told apart from chance", while the n=40 one reads
+  "n40-B-answering lowered contains 100% → 0% … significant, CI -1.00 to -1.00".
+  The delta is still in the table either way; only the headline changes.
+- A "compared on n of m items" line always shows, plus an explicit warning when
+  `partial` — the dataset changed between the runs.
+- Entry points: checkbox column + selection bar on the run list (capped at two;
+  a third selection drops the oldest, and the Compare button stays disabled with
+  an explanation when the two runs scored different datasets), and a
+  "Compare against…" popover on the run detail page listing only runs over the
+  same dataset. The popover closes on Escape and on outside click.
+- Route note: `/evals/compare` and `/evals/[runId]` coexist because Next.js
+  prefers the static segment. This is the opposite of the API, where FastAPI
+  matches in declaration order and `compare` had to be declared first.
+- `npx tsc --noEmit` clean; `npm run build` clean.
+
 ## What exists
 
 - Root: compose (postgres/redis/api/worker/web + `observability` profile:
@@ -254,10 +587,15 @@ API-death scenarios.
   (pricing resolver registry with the cloud-mode built-ins-only rule),
   `config.py`, `db.py`, `metrics.py` (:9101). `eval_runner`, `sampler`,
   `alerter`, `retention` remain spec-docstring stubs.
-  `pricing.py` has a starter price table — **prices are still unverified against
-  live provider pricing pages**; check before any cost claim is user-facing.
-- `apps/web`: minimal Next.js 14 App Router + Tailwind page (placeholder until
-  Phase 4). `npm install` has NOT been run yet.
+  `pricing.py` is **partly verified**: Anthropic entries were checked against the
+  published list on 2026-07-21 and Google's were added under ADR-0016, but the
+  two OpenAI entries are still marked `# placeholders — verify` in the file.
+  Don't make a user-facing cost claim on a `gpt-4o` trace. (Earlier STATUS text
+  called the whole table unverified in one place and corrected in another;
+  neither was right.)
+- `apps/web`: the full dashboard — see the Phase 4 and Phase 5 sections above
+  for what it contains. (This entry previously described a placeholder page with
+  `npm install` not yet run; that was two phases out of date.)
 - `sdks/python` (`anvil-sdk` 0.1.0): `_wire.py` (Trace/Span + truncation +
   redact), `_client.py` (bounded queue, background flusher, backoff),
   `_tracer.py` (contextvars, `@observe`, manual API), `langchain.py`
@@ -277,11 +615,27 @@ API-death scenarios.
 
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
-   trace for jank, then commit.
-2. **Phase 5 — datasets & eval engine** (plan/evaluation.md §1–3). The
-   dashboard's "Add to dataset" stub and the Datasets/Evals nav entries are
-   waiting for it.
-3. Then Phase 6 onward per plan.md's phase table.
+   trace for jank.
+2. **Prove `mode="generate"` against a real provider.** It is implemented
+   (`eval_runner.py:80`) but has only ever run against `"fake-model"` in unit
+   tests. Phase 6 needs two runs with a known shift, and generate mode is the
+   only way to produce one — rescore over the same dataset gives identical
+   results by construction. Do it cheaply: deterministic graders
+   (`valid_json` / `length_bounds` / `contains`) cost nothing, so only the
+   target generations are billable, and `gemini-2.5-flash-lite` is $0.10/$0.40
+   per Mtok. **Judged comparison is not a prerequisite** — the stats layer does
+   not care where scores come from.
+3. **Phase 6 — comparison & stats** (plan/evaluation.md §4):
+   `anvil_api/services/analysis.py` (paired bootstrap + McNemar, intersection
+   of item snapshots, "inconclusive" honesty rule), the compare endpoint, and
+   the `/evals/compare` UI. The item snapshots Phase 5 freezes are the
+   foundation it joins on — verified present and ordered: `eval_runs.item_ids`
+   is frozen at claim (`eval_runner.py:363–377`) and `eval_results` is keyed by
+   `(run_id, item_id)`, so the intersection join needs no prep work.
+   Phase 6 should also refuse to render a verdict when a grader's scores are
+   largely `tautological` (ADR-0018) — a confident zero delta over
+   self-comparisons is exactly the dishonesty the phase exists to prevent.
+3. Then Phase 7 onward per plan.md's phase table.
 
 ### Phase 3 leftovers worth knowing
 

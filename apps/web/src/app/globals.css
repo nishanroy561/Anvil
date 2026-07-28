@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   body {
@@ -12,12 +12,12 @@
   }
 
   ::selection {
-    background: rgba(244, 118, 43, 0.3);
+    background: rgba(59, 118, 255, 0.18);
   }
 
   /* Keyboard focus is always visible; pointer focus stays quiet. */
   :focus-visible {
-    outline: 2px solid #f4762b;
+    outline: 2px solid #3b76ff;
     outline-offset: 1px;
     border-radius: 2px;
   }
@@ -25,14 +25,14 @@
   /* Thin scrollbars that match the surface, not the OS chrome. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: #2e3646 transparent;
+    scrollbar-color: #d6d6d5 transparent;
   }
   *::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
   *::-webkit-scrollbar-thumb {
-    background: #2e3646;
+    background: #d6d6d5;
     border-radius: 4px;
   }
   *::-webkit-scrollbar-track {
@@ -51,21 +51,58 @@
 }
 
 @layer components {
+  /* Scroll reveal: hidden until Reveal flips is-visible, then rises 14px. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 0.55s ease,
+      transform 0.55s cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+  .reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Hero load-in: same rise, keyframe-driven so it plays without JS. */
+  .rise {
+    animation: rise-in 0.55s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal,
+    .rise {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
   .field {
     @apply h-8 rounded-md border border-line bg-iron-900 px-2.5 text-[13px] text-ink
       placeholder:text-ink-faint transition-colors duration-150
       hover:border-line-strong focus:border-ember focus:outline-none;
   }
 
+  /* Primary action: near-black, the way the rest of the page stays neutral. */
   .btn-ember {
     @apply inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md
-      bg-ember px-3.5 text-[13px] font-medium text-iron-950 transition-colors
-      duration-150 hover:bg-ember-bright disabled:cursor-not-allowed disabled:opacity-50;
+      bg-ink px-3.5 text-[13px] font-medium text-white transition-colors
+      duration-150 hover:bg-[#2b2b31] disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn-ghost {
     @apply inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md
-      border border-line bg-transparent px-3 text-[13px] text-ink-muted
-      transition-colors duration-150 hover:border-line-strong hover:text-ink;
+      border border-line-strong bg-iron-900 px-3 text-[13px] text-ink-muted
+      transition-colors duration-150 hover:border-[#c2c2c0] hover:text-ink;
   }
 }

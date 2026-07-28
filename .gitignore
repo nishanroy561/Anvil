@@ -20,6 +20,10 @@ dist/
 .env.local
 *.local.yml
 
+# Scratch left by local acceptance runs
+.cookiejar_path
+.p5_run
+
 # OS / editor
 .DS_Store
 Thumbs.db

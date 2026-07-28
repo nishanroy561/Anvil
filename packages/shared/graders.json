@@ -1,0 +1,188 @@
+{
+  "$comment": "Built-in grader catalog — the single source of truth for grader names, kinds, and config schemas (plan/evaluation.md §2). The worker implements these; the API serves this list to drive the UI's grader picker and to validate run configs, without importing worker code (ADR-0014). Vendored into both services by scripts/sync_schemas.py. Third-party graders discovered via the anvil.graders entry point are additive at runtime and are not listed here.",
+  "graders": [
+    {
+      "name": "valid_json",
+      "kind": "deterministic",
+      "description": "Scores 1 when the output parses as JSON. Optionally requires specific top-level keys.",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "required_keys": {
+            "type": "array",
+            "items": { "type": "string" },
+            "title": "Required keys",
+            "description": "Top-level keys that must be present."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "contains",
+      "kind": "deterministic",
+      "description": "Scores 1 when the output contains the given text or matches the regex.",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "string", "title": "Text or pattern" },
+          "regex": { "type": "boolean", "title": "Treat as regex", "default": false },
+          "case_sensitive": { "type": "boolean", "title": "Case sensitive", "default": false }
+        },
+        "required": ["value"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "not_contains",
+      "kind": "deterministic",
+      "description": "Scores 1 when the output does NOT contain the given text or match the regex.",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "string", "title": "Text or pattern" },
+          "regex": { "type": "boolean", "title": "Treat as regex", "default": false },
+          "case_sensitive": { "type": "boolean", "title": "Case sensitive", "default": false }
+        },
+        "required": ["value"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "length_bounds",
+      "kind": "deterministic",
+      "description": "Scores 1 when the output length falls within bounds, measured in characters or whitespace-delimited words.",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "min": { "type": "integer", "minimum": 0, "title": "Minimum" },
+          "max": { "type": "integer", "minimum": 0, "title": "Maximum" },
+          "unit": {
+            "type": "string",
+            "enum": ["chars", "words"],
+            "default": "chars",
+            "title": "Unit"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "exact_match",
+      "kind": "deterministic",
+      "description": "Scores 1 when the output equals the item's expected output.",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "case_sensitive": { "type": "boolean", "title": "Case sensitive", "default": false },
+          "strip": { "type": "boolean", "title": "Ignore surrounding whitespace", "default": true }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "citation_present",
+      "kind": "deterministic",
+      "description": "Scores 1 when the output cites a source — bracketed markers like [1] or a URL.",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "style": {
+            "type": "string",
+            "enum": ["bracket", "url", "either"],
+            "default": "either",
+            "title": "Citation style"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "accuracy",
+      "kind": "judge",
+      "description": "LLM judge: how well does the output match the item's expected output?",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "model": { "type": "string", "title": "Judge model" },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.7,
+            "title": "Pass threshold"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hallucination",
+      "kind": "judge",
+      "description": "LLM judge: is the output grounded in the provided context? Scores 1 when fully grounded.",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "model": { "type": "string", "title": "Judge model" },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.7,
+            "title": "Pass threshold"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "tone",
+      "kind": "judge",
+      "description": "LLM judge: does the output match the requested tone?",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "tone": {
+            "type": "string",
+            "default": "professional and helpful",
+            "title": "Desired tone"
+          },
+          "model": { "type": "string", "title": "Judge model" },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.7,
+            "title": "Pass threshold"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "custom",
+      "kind": "judge",
+      "description": "LLM judge against your own rubric.",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "rubric": {
+            "type": "string",
+            "title": "Rubric",
+            "description": "What should the judge reward and penalize?"
+          },
+          "model": { "type": "string", "title": "Judge model" },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.7,
+            "title": "Pass threshold"
+          }
+        },
+        "required": ["rubric"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

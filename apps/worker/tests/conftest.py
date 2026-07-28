@@ -53,7 +53,10 @@ requires_services = pytest.mark.skipif(
     reason="needs Postgres+Redis: docker compose up -d postgres redis",
 )
 
-TRUNCATE_TABLES = "traces, spans, feedback, projects, organizations, users"
+TRUNCATE_TABLES = (
+    "eval_results, eval_runs, dataset_items, datasets, "
+    "traces, spans, feedback, projects, organizations, users"
+)
 
 
 async def _recreate_database() -> None:
@@ -102,6 +105,31 @@ async def close_engine(database):
     yield
     if SERVICES_UP:
         await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _keyless(monkeypatch):
+    """The suite never touches a real provider (CLAUDE.md: mock all LLM calls).
+
+    Two guards, because either alone leaks: clearing the keys is undone by
+    `load_env()` reading the repo-root `.env` (which a developer's box has, with
+    live keys in it), and blocking the load alone leaves keys that were exported
+    into the shell. A test that wants a provider injects a fake through
+    `model_factory`.
+    """
+    from anvil_worker import dogfood, providers
+
+    monkeypatch.setattr(providers, "_env_loaded", True)
+    for env_var, _prefixes, _default in providers.PROVIDERS:
+        monkeypatch.delenv(env_var, raising=False)
+
+    # Judge tracing is a network client, not a provider, but it leaks the same
+    # way: a developer's `.env` carries a real internal key, and the suite would
+    # ship test judge traces into a live project. Off, and memoisation cleared
+    # so an enabling test can't leave a client behind for the next one.
+    monkeypatch.delenv(dogfood.API_KEY_ENV, raising=False)
+    monkeypatch.setattr(dogfood, "_client", None)
+    monkeypatch.setattr(dogfood, "_resolved", False)
 
 
 @pytest.fixture

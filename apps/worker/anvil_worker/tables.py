@@ -16,6 +16,7 @@ from sqlalchemy import (
     Table,
     Text,
     Uuid,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -41,6 +42,63 @@ traces = Table(
     Column("user_ref", String(256)),
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("ended_at", DateTime(timezone=True)),
+)
+
+datasets = Table(
+    "datasets",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("project_id", Uuid, nullable=False),
+    Column("name", String(256), nullable=False),
+    Column("description", Text),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+dataset_items = Table(
+    "dataset_items",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("dataset_id", Uuid, nullable=False),
+    Column("input", JSONB),
+    Column("expected_output", JSONB),
+    Column("metadata", JSONB),
+    Column("source_trace_id", Uuid),
+)
+
+eval_runs = Table(
+    "eval_runs",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("project_id", Uuid, nullable=False),
+    Column("dataset_id", Uuid, nullable=False),
+    Column("name", String(256), nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("target_config", JSONB),
+    Column("grader_config", JSONB),
+    Column("item_ids", JSONB),
+    Column("progress", Integer),
+    Column("total", Integer),
+    Column("summary", JSONB),
+    Column("started_at", DateTime(timezone=True)),
+    Column("completed_at", DateTime(timezone=True)),
+    # Doubles as the runner heartbeat — see eval_runner.py.
+    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
+    Column("created_at", DateTime(timezone=True)),
+)
+
+eval_results = Table(
+    "eval_results",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("run_id", Uuid, nullable=False),
+    Column("item_id", Uuid, nullable=False),
+    Column("output", JSONB),
+    Column("scores", JSONB),
+    Column("judge_reasoning", JSONB),
+    Column("latency_ms", Integer),
+    Column("cost_usd", Numeric(12, 6)),
+    Column("error", Text),
+    Column("created_at", DateTime(timezone=True)),
 )
 
 spans = Table(

@@ -9,7 +9,12 @@ TRACES_STREAM = "ingest:traces"
 FEEDBACK_STREAM = "ingest:feedback"
 DLQ_STREAM = "ingest:dlq"
 
+# Eval job queue (plan/evaluation.md §3). Same Redis, separate stream and group
+# so a backed-up eval queue can never delay trace ingestion.
+EVAL_JOBS_STREAM = "eval:jobs"
+
 PERSISTERS_GROUP = "persisters"
+EVAL_RUNNERS_GROUP = "eval-runners"
 
 # Redis hash of ingest counters, exposed at /v1/ingest/stats so a throttled
 # customer is diagnosable (plan/ingestion.md §2).

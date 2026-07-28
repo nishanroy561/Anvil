@@ -18,8 +18,8 @@ export function AnvilMark({ className }: { className?: string }) {
         fill="currentColor"
       />
       <rect x="6" y="18" width="12" height="2.5" rx="0.5" fill="currentColor" />
-      {/* ember face */}
-      <rect x="3" y="6" width="18" height="1.2" fill="#F4762B" />
+      {/* accent face */}
+      <rect x="3" y="6" width="18" height="1.2" fill="#3B76FF" />
     </svg>
   );
 }
