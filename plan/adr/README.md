@@ -27,6 +27,7 @@ Every load-bearing decision gets an ADR: short, immutable once accepted, superse
 | [0017](0017-judge-calls-traced-into-an-internal-project.md) | Judge calls are traced into a designated internal project, opt-in via `ANVIL_INTERNAL_API_KEY` | Accepted |
 | [0018](0018-recorded-output-is-kept-apart-from-expected-output.md) | The recorded output is kept in `metadata.recorded_output`, apart from the reference `expected_output` | Accepted |
 | [0019](0019-fully-open-source-no-commercial-tiers.md) | Fully open source: no plans, quotas or hosted tier; Phase 10 becomes retention | Accepted |
+| [0020](0020-inference-hosts-are-addressed-with-a-routing-prefix.md) | Inference hosts get an explicit `groq/`-style routing prefix; extends 0016 | Accepted |
 
 ## Template
 
