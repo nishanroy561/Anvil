@@ -106,3 +106,36 @@ async def current_project_from_api_key(
     context: ApiKeyContext = Depends(current_api_key_context),
 ) -> Project:
     return context.project
+
+
+# ── Either credential ───────────────────────────────────────────────────
+
+class Caller(NamedTuple):
+    """Who is asking, however they authenticated (ADR-0021).
+
+    The dashboard sends a session cookie and may reach every project in its
+    org; CI sends an API key and may reach exactly the one project that key
+    grants. Routes that both need — creating and polling eval runs — resolve
+    through this rather than picking one credential and locking the other out.
+
+    Exactly one field is set. `project` being set is itself the authorization:
+    an API-key caller is confined to that project by construction, with no
+    org-wide reach to get wrong.
+    """
+
+    user: User | None = None
+    project: Project | None = None
+
+
+async def current_caller(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> Caller:
+    """Resolves a session cookie or an `Authorization: Bearer ak_…` key.
+
+    The API key is checked first: a CI job that sends one should never be
+    silently downgraded to a stale browser cookie that happens to be present.
+    """
+    if request.headers.get("authorization", "").lower().startswith("bearer ak_"):
+        context = await current_api_key_context(request, session)
+        return Caller(project=context.project)
+    return Caller(user=await current_user(request, session))

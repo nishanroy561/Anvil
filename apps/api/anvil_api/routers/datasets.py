@@ -12,10 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import current_user
+from ..auth import Caller, current_caller
 from ..db import get_session
 from ..deps import NOT_FOUND, owned_project
-from ..models import Dataset, DatasetItem, EvalRun, Trace, User
+from ..models import Dataset, DatasetItem, EvalRun, Trace
 from ..schemas.evaluation import (
     DatasetCreate,
     DatasetItemOut,
@@ -31,12 +31,12 @@ from ..schemas.evaluation import (
 router = APIRouter(prefix="/v1", tags=["datasets"])
 
 
-async def owned_dataset(dataset_id: uuid.UUID, user: User, session: AsyncSession) -> Dataset:
+async def owned_dataset(dataset_id: uuid.UUID, caller: Caller, session: AsyncSession) -> Dataset:
     """A dataset in another org 404s exactly like one that doesn't exist."""
     dataset = await session.get(Dataset, dataset_id)
     if dataset is None:
         raise NOT_FOUND
-    await owned_project(dataset.project_id, user, session)
+    await owned_project(dataset.project_id, caller, session)
     return dataset
 
 
@@ -65,10 +65,10 @@ def _out(dataset: Dataset, item_count: int) -> DatasetOut:
 @router.get("/projects/{project_id}/datasets", response_model=list[DatasetOut])
 async def list_datasets(
     project_id: uuid.UUID,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    project = await owned_project(project_id, user, session)
+    project = await owned_project(project_id, caller, session)
     rows = await session.execute(
         select(Dataset)
         .where(Dataset.project_id == project.id)
@@ -83,10 +83,10 @@ async def list_datasets(
 async def create_dataset(
     project_id: uuid.UUID,
     body: DatasetCreate,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    project = await owned_project(project_id, user, session)
+    project = await owned_project(project_id, caller, session)
     dataset = Dataset(project_id=project.id, name=body.name, description=body.description)
     session.add(dataset)
     await session.commit()
@@ -97,10 +97,10 @@ async def create_dataset(
 @router.get("/datasets/{dataset_id}", response_model=DatasetOut)
 async def get_dataset(
     dataset_id: uuid.UUID,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    dataset = await owned_dataset(dataset_id, user, session)
+    dataset = await owned_dataset(dataset_id, caller, session)
     counts = await _item_counts(session, [dataset.id])
     return _out(dataset, counts.get(dataset.id, 0))
 
@@ -109,10 +109,10 @@ async def get_dataset(
 async def update_dataset(
     dataset_id: uuid.UUID,
     body: DatasetUpdate,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    dataset = await owned_dataset(dataset_id, user, session)
+    dataset = await owned_dataset(dataset_id, caller, session)
     if body.name is not None:
         dataset.name = body.name
     if body.description is not None:
@@ -126,10 +126,10 @@ async def update_dataset(
 @router.delete("/datasets/{dataset_id}", status_code=204)
 async def delete_dataset(
     dataset_id: uuid.UUID,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    dataset = await owned_dataset(dataset_id, user, session)
+    dataset = await owned_dataset(dataset_id, caller, session)
     # Eval runs reference the dataset and their results reference its items;
     # deleting underneath them would strand history rather than free anything.
     existing_run = await session.execute(
@@ -156,10 +156,10 @@ async def list_items(
     dataset_id: uuid.UUID,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    dataset = await owned_dataset(dataset_id, user, session)
+    dataset = await owned_dataset(dataset_id, caller, session)
     total = await session.scalar(
         select(func.count()).select_from(DatasetItem).where(DatasetItem.dataset_id == dataset.id)
     )
@@ -190,10 +190,10 @@ async def list_items(
 async def add_items(
     dataset_id: uuid.UUID,
     body: DatasetItemsCreate,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    dataset = await owned_dataset(dataset_id, user, session)
+    dataset = await owned_dataset(dataset_id, caller, session)
     items = [
         DatasetItem(
             dataset_id=dataset.id,
@@ -224,13 +224,13 @@ async def add_items(
 async def update_item(
     item_id: uuid.UUID,
     body: DatasetItemUpdate,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
     item = await session.get(DatasetItem, item_id)
     if item is None:
         raise NOT_FOUND
-    await owned_dataset(item.dataset_id, user, session)
+    await owned_dataset(item.dataset_id, caller, session)
 
     fields = body.model_dump(exclude_unset=True)
     if "input" in fields:
@@ -259,13 +259,13 @@ async def update_item(
 @router.delete("/dataset-items/{item_id}", status_code=204)
 async def delete_item(
     item_id: uuid.UUID,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
     item = await session.get(DatasetItem, item_id)
     if item is None:
         raise NOT_FOUND
-    await owned_dataset(item.dataset_id, user, session)
+    await owned_dataset(item.dataset_id, caller, session)
     await session.delete(item)
     await session.commit()
 
@@ -277,7 +277,7 @@ async def delete_item(
 async def promote_traces(
     dataset_id: uuid.UUID,
     body: PromoteRequest,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
     """Copies each trace's root input/output into an item.
@@ -287,7 +287,7 @@ async def promote_traces(
     because one row was stale. Re-promoting a trace already in this dataset is
     a no-op, so the button is safe to double-click.
     """
-    dataset = await owned_dataset(dataset_id, user, session)
+    dataset = await owned_dataset(dataset_id, caller, session)
 
     rows = await session.execute(
         select(Trace).where(

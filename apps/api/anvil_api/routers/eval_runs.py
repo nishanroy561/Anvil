@@ -14,11 +14,11 @@ from redis.exceptions import RedisError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import current_user
+from ..auth import Caller, current_caller
 from ..config import get_settings
 from ..db import get_session
 from ..deps import NOT_FOUND, owned_project
-from ..models import Dataset, DatasetItem, EvalResult, EvalRun, User
+from ..models import Dataset, DatasetItem, EvalResult, EvalRun
 from ..redis_client import get_redis
 from ..schemas.evaluation import (
     EvalResultOut,
@@ -42,24 +42,24 @@ TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
 
 @router.get("/graders", response_model=list[GraderInfo])
-async def list_graders(user: User = Depends(current_user)):
+async def list_graders(caller: Caller = Depends(current_caller)):
     """Registry-driven picker data (plan/plugins.md §2). Built-ins only — the
     API can't enumerate plugins installed in the worker image."""
     return [GraderInfo(**g) for g in builtin_graders()]
 
 
-async def owned_run(run_id: uuid.UUID, user: User, session: AsyncSession) -> EvalRun:
+async def owned_run(run_id: uuid.UUID, caller: Caller, session: AsyncSession) -> EvalRun:
     run = await session.get(EvalRun, run_id)
     if run is None:
         raise NOT_FOUND
-    await owned_project(run.project_id, user, session)
+    await owned_project(run.project_id, caller, session)
     return run
 
 
 @router.post("/eval-runs", response_model=EvalRunOut, status_code=201)
 async def create_eval_run(
     body: EvalRunCreate,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
     settings = get_settings()
@@ -67,7 +67,7 @@ async def create_eval_run(
     dataset = await session.get(Dataset, body.dataset_id)
     if dataset is None:
         raise NOT_FOUND
-    project = await owned_project(dataset.project_id, user, session)
+    project = await owned_project(dataset.project_id, caller, session)
 
     item_count = await session.scalar(
         select(func.count()).select_from(DatasetItem).where(DatasetItem.dataset_id == dataset.id)
@@ -166,10 +166,10 @@ async def list_eval_runs(
     project_id: uuid.UUID,
     dataset_id: uuid.UUID | None = None,
     limit: int = Query(50, ge=1, le=200),
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    project = await owned_project(project_id, user, session)
+    project = await owned_project(project_id, caller, session)
     filters = [EvalRun.project_id == project.id]
     if dataset_id is not None:
         filters.append(EvalRun.dataset_id == dataset_id)
@@ -183,7 +183,7 @@ async def list_eval_runs(
 async def compare_eval_runs(
     a: uuid.UUID = Query(..., description="Baseline run"),
     b: uuid.UUID = Query(..., description="Run being judged against the baseline"),
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
     """Paired comparison of two runs over the same dataset (ADR-0008).
@@ -192,8 +192,8 @@ async def compare_eval_runs(
     declaration order, and the other way round "compare" is parsed as a run id
     and 422s.
     """
-    run_a = await owned_run(a, user, session)
-    run_b = await owned_run(b, user, session)
+    run_a = await owned_run(a, caller, session)
+    run_b = await owned_run(b, caller, session)
 
     if run_a.dataset_id != run_b.dataset_id:
         raise HTTPException(
@@ -243,10 +243,10 @@ async def compare_eval_runs(
 @router.get("/eval-runs/{run_id}", response_model=EvalRunOut)
 async def get_eval_run(
     run_id: uuid.UUID,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    return EvalRunOut.model_validate(await owned_run(run_id, user, session))
+    return EvalRunOut.model_validate(await owned_run(run_id, caller, session))
 
 
 @router.get("/eval-runs/{run_id}/results", response_model=EvalResultPage)
@@ -254,10 +254,10 @@ async def get_eval_results(
     run_id: uuid.UUID,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
-    run = await owned_run(run_id, user, session)
+    run = await owned_run(run_id, caller, session)
     total = await session.scalar(
         select(func.count()).select_from(EvalResult).where(EvalResult.run_id == run.id)
     )
@@ -277,12 +277,12 @@ async def get_eval_results(
 @router.post("/eval-runs/{run_id}/cancel", response_model=EvalRunOut)
 async def cancel_eval_run(
     run_id: uuid.UUID,
-    user: User = Depends(current_user),
+    caller: Caller = Depends(current_caller),
     session: AsyncSession = Depends(get_session),
 ):
     """Cooperative cancellation: the runner checks status between items, so a
     cancel lands within one item rather than mid-call."""
-    run = await owned_run(run_id, user, session)
+    run = await owned_run(run_id, caller, session)
     if run.status in TERMINAL_STATUSES:
         raise HTTPException(
             409,

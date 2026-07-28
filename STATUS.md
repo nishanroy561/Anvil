@@ -4,9 +4,70 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-28 (Phase 4/5 gap closure + open-source decision)
+Last updated: 2026-07-28 (Phases 6 and 7 complete)
 
-## 2026-07-28 session
+## Phase 7 — CI gating (2026-07-28). DONE, acceptance passes.
+
+- **`anvil eval run`** lives in the Python SDK (`anvil_sdk/cli.py`, entry point
+  `anvil`), because CI already installs the SDK. Reads `eval.yaml`, creates a
+  run, polls with `--wait`, prints a per-grader table, and gates.
+- **The exit codes are the product**, and `1` vs `2` is deliberate: `0` pass,
+  `1` a threshold failed or a grader *significantly* regressed, `2` the run
+  never finished, `3` bad config/credentials/API. "Quality dropped" and "the
+  eval never ran" are different conversations; a red check that conflates them
+  gets ignored.
+- **Three things fail the gate that look like passes**, all of which would
+  otherwise go green while measuring nothing: a `--min-score` naming a grader
+  absent from the run (a typo would silently disable the check), a grader where
+  every item errored (`mean` is null, not zero), and a grader whose scores are
+  entirely tautological (ADR-0018).
+- **Inconclusive never blocks.** A gate that fires on noise is switched off
+  within a week, and `inconclusive` is the honest reading (ADR-0008). Documented
+  consequence: a 12-item dataset will essentially never block anything.
+- `examples/ci-gate/` — commented `eval.yaml`, a working `workflow.yml` (PR
+  paths filter, concurrency cancel-in-progress, PR comment, exit-code mapping),
+  and a README. Both YAML files parse.
+- **Acceptance: `python scripts/ci_gate_acceptance.py` → PASSED.** Six checks
+  over live HTTP with the real CLI as a subprocess: lenient threshold (mean
+  0.500 ≥ 0.4) → 0; strict (0.500 < 0.8) → 1; typo'd grader → 1; significant
+  regression vs baseline → 1; n=5 with no movement → 0; bad API key → 3.
+  No provider credits spent.
+- **Prerequisite built first: the eval APIs had no API-key auth**
+  ([ADR-0021](plan/adr/0021-eval-apis-accept-either-a-session-or-an-api-key.md)).
+  They were session-cookie only, so CI would have had to store a *user's email
+  and password*. Dataset and eval-run routes now accept either credential via a
+  `Caller`; `deps.owned_project()` resolves both and stays the one place the
+  "404, never 403" rule lives. The API key is checked **first** — a request
+  carrying both must not be silently downgraded to whatever browser session is
+  in the cookie jar — and a bad key 401s rather than falling through. Traces and
+  projects stay session-only; nothing needs them from CI.
+- **Groq is a supported provider**
+  ([ADR-0020](plan/adr/0020-inference-hosts-are-addressed-with-a-routing-prefix.md)).
+  Groq hosts models rather than making them, so ADR-0016's "family name implies
+  provider" rule breaks: `llama-3.3-70b-versatile` says nothing about who serves
+  it, and `openai/gpt-oss-120b` would route to OpenAI under any name-trusting
+  rule. Inference hosts therefore take an explicit `groq/` routing prefix, of
+  which only the first segment is stripped — so `groq/openai/gpt-oss-120b`
+  reaches Groq as `openai/gpt-oss-120b`, and Groq's own `groq/compound` is
+  addressed as `groq/groq/compound`. Prices verified against groq.com/pricing
+  and keyed on the full prefixed name; `groq/compound` is deliberately unpriced
+  (Groq passes cost through, so null is the honest answer). Verified live.
+
+### Two bugs the Phase 7 acceptance caught that the unit tests could not
+
+1. **The CLI crashed on Windows consoles.** It printed `→` and `—`, which
+   `UnicodeEncodeError` on a cp1252 stream — so the gate died mid-run on any
+   non-UTF-8 console. All printed strings are ASCII now; docstrings and comments
+   were left alone since they are never written to a stream. The mocked tests
+   captured to a `StringIO` and never touched an encoder, which is exactly why
+   this needed a live run.
+2. **A stale server invalidated the first acceptance attempt.** `pkill -f
+   uvicorn` does not work on this Windows box (same for `next dev`), so a server
+   started hours earlier still held :8000 and the "new" one silently failed to
+   bind — the whole run was testing pre-ADR-0021 code and reporting 401s. Kill
+   by PID via `Get-CimInstance Win32_Process` instead; `pkill` lies here.
+
+## 2026-07-28 session (earlier — Phase 5 gaps, open source, Phase 6)
 
 **Anvil is now fully open source — no plans, no quotas, no hosted tier**
 ([ADR-0019](plan/adr/0019-fully-open-source-no-commercial-tiers.md), superseding
@@ -38,9 +99,9 @@ sitting uncommitted), and the two remaining UI defects are fixed — dataset cel
 that clipped mid-JSON now have a show more/less toggle, and a new amber
 `status-warn` token carries the tautology warnings.
 
-**Phase 6 backend is built and its acceptance passes** (see the Phase 6 section
-below). The `/evals/compare` UI is the remaining half and is **awaiting the
-user's go-ahead**.
+**Phase 6 is complete** — backend, acceptance and the `/evals/compare` UI (the
+UI go-ahead was given and it was built the same session). See the Phase 6
+section below.
 
 **Two gaps closed while running the acceptance:**
 
@@ -63,8 +124,8 @@ user's go-ahead**.
    and 400s `invalid_grader_config`. Unknown graders stay unvalidated (they may
    be worker-side plugins the API cannot see).
 
-**Test counts after this session: API 128, worker 117.** Both suites green with
-Postgres/Redis up; `npx tsc --noEmit` clean in `apps/web`.
+**Test counts: API 138, worker 125, Python SDK 57.** All green with
+Postgres/Redis up; `npx tsc --noEmit` and `npm run build` clean in `apps/web`.
 
 **UI restyle (2026-07-22, user-directed):** the web app moved from the dark
 "iron & ember" theme to a light neutral system modeled on the user's reference
@@ -99,7 +160,9 @@ valid_json/exact_match/length_bounds/accuracy → live progress → per-item sco
 means — mean=None, not 0). As of 2026-07-24 the live judge call is proven
 against Gemini at the unit level; the judged full-stack rerun is still to do.
 See "Phase 5 gaps" #1.** User gave the Phase 5 UI go-ahead.
-Phases 6–11: not started (stubs with spec pointers exist).
+**Phase 6 (comparison & stats): DONE** — acceptance passes.
+**Phase 7 (CI gating): DONE** — acceptance passes.
+Phases 8–11: not started (stubs with spec pointers exist).
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -615,27 +678,19 @@ API-death scenarios.
 
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
-   trace for jank.
-2. **Prove `mode="generate"` against a real provider.** It is implemented
-   (`eval_runner.py:80`) but has only ever run against `"fake-model"` in unit
-   tests. Phase 6 needs two runs with a known shift, and generate mode is the
-   only way to produce one — rescore over the same dataset gives identical
-   results by construction. Do it cheaply: deterministic graders
-   (`valid_json` / `length_bounds` / `contains`) cost nothing, so only the
-   target generations are billable, and `gemini-2.5-flash-lite` is $0.10/$0.40
-   per Mtok. **Judged comparison is not a prerequisite** — the stats layer does
-   not care where scores come from.
-3. **Phase 6 — comparison & stats** (plan/evaluation.md §4):
-   `anvil_api/services/analysis.py` (paired bootstrap + McNemar, intersection
-   of item snapshots, "inconclusive" honesty rule), the compare endpoint, and
-   the `/evals/compare` UI. The item snapshots Phase 5 freezes are the
-   foundation it joins on — verified present and ordered: `eval_runs.item_ids`
-   is frozen at claim (`eval_runner.py:363–377`) and `eval_results` is keyed by
-   `(run_id, item_id)`, so the intersection join needs no prep work.
-   Phase 6 should also refuse to render a verdict when a grader's scores are
-   largely `tautological` (ADR-0018) — a confident zero delta over
-   self-comparisons is exactly the dishonesty the phase exists to prevent.
-3. Then Phase 7 onward per plan.md's phase table.
+   trace for jank. Worth a look at `/evals/compare` while there.
+2. **Phase 8 — monitors & alerts** (plan/evaluation.md §6): `sampler.py` and
+   `alerter.py` are 6-line stubs. Needs monitor CRUD + UI, the sampling loop,
+   alert rules, the webhook channel, and `--drift` in the demo seeder.
+3. **Phase 9 — feedback loop** (plan/evaluation.md §7): the `ingest:feedback`
+   stream is declared in both `streams.py` files with no consumer, and
+   `client.feedback()` is missing from both SDKs. 8 and 9 are independent — do
+   them in either order.
+4. Then 10 (retention) and 11 (hardening) per plan.md's phase table.
+
+**Backfill worth doing at some point:** items promoted before ADR-0018 have no
+`metadata.recorded_output`, so their reference-comparing scores come back
+`tautological`. Re-promote them or backfill from `source_trace_id`.
 
 ### Phase 3 leftovers worth knowing
 
@@ -643,8 +698,8 @@ API-death scenarios.
   Phase 9 (evaluation.md §7), which owns the endpoint it would call. The pieces
   it needs are already in place: `trace.id` is a client-generated UUID exposed
   on the object and returned by the demo app's `/ask` response.
-- **The eval CLI (`anvil eval run`) is not in the Python SDK yet** — that is
-  Phase 7 (evaluation.md §5), which `plan/sdk.md` §0 notes is hosted here.
+- ~~The eval CLI is not in the Python SDK yet~~ — **built in Phase 7**;
+  `anvil_sdk/cli.py`, entry point `anvil`, extras `[cli]` for PyYAML.
 - The TS SDK's tests inject a scripted `fetchImpl` rather than using **msw**,
   which `plan/sdk.md` §2 suggested. Same coverage, one less dependency, and
   fully deterministic — but it is a deliberate deviation from the spec doc.

@@ -1,0 +1,88 @@
+# Anvil eval gate — copy to .github/workflows/eval-gate.yml in your own repo.
+#
+# Runs the eval suite when a PR changes a prompt, and fails the check if quality
+# dropped. Exit codes are the contract (see `anvil_sdk/cli.py`):
+#
+#   0  thresholds met, no significant regression
+#   1  a threshold failed, or a grader significantly regressed  -> block
+#   2  the run never finished (failed/cancelled/timed out)      -> infra problem
+#   3  bad config or credentials                                -> your fault
+#
+# 1 and 2 are separate on purpose: "quality dropped" and "the eval never ran"
+# are different conversations, and a red check that conflates them gets ignored.
+
+name: Eval gate
+
+on:
+  pull_request:
+    paths:
+      - "prompts/**"
+      - "eval.yaml"
+
+# One run per PR. A force-push mid-eval should cancel the old run rather than
+# leave two gates racing and burning judge credits on a dead commit.
+concurrency:
+  group: eval-gate-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the Anvil CLI
+        # Published: pip install 'anvil-sdk[cli]'
+        # In-tree while the SDK is unpublished:
+        run: pip install './sdks/python[cli]'
+
+      - name: Run the eval gate
+        id: gate
+        env:
+          # A project-scoped API key (ADR-0021) — not a user's password.
+          # Settings -> API keys in the dashboard, then add it as a repo secret.
+          ANVIL_API_KEY: ${{ secrets.ANVIL_API_KEY }}
+          ANVIL_BASE_URL: ${{ secrets.ANVIL_BASE_URL }}
+        run: |
+          set +e
+          anvil eval run \
+            --config eval.yaml \
+            --name "pr-${{ github.event.pull_request.number }}" \
+            --wait \
+            --min-score accuracy=0.8 \
+            --min-score citation_present=0.9 \
+            --baseline-run "${{ vars.ANVIL_BASELINE_RUN }}" \
+            | tee gate.txt
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Comment the results on the PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.existsSync('gate.txt') ? fs.readFileSync('gate.txt', 'utf8') : '(no output)';
+            const code = '${{ steps.gate.outputs.code }}';
+            const heading = code === '0' ? 'Eval gate passed'
+              : code === '1' ? 'Eval gate failed — quality regressed'
+              : code === '2' ? 'Eval run did not finish (infrastructure, not your change)'
+              : 'Eval gate could not run (config or credentials)';
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### ${heading}\n\n\`\`\`\n${body.slice(0, 60000)}\n\`\`\``,
+            });
+
+      - name: Fail the check on a gate failure
+        if: steps.gate.outputs.code != '0'
+        run: exit 1

@@ -28,6 +28,7 @@ Every load-bearing decision gets an ADR: short, immutable once accepted, superse
 | [0018](0018-recorded-output-is-kept-apart-from-expected-output.md) | The recorded output is kept in `metadata.recorded_output`, apart from the reference `expected_output` | Accepted |
 | [0019](0019-fully-open-source-no-commercial-tiers.md) | Fully open source: no plans, quotas or hosted tier; Phase 10 becomes retention | Accepted |
 | [0020](0020-inference-hosts-are-addressed-with-a-routing-prefix.md) | Inference hosts get an explicit `groq/`-style routing prefix; extends 0016 | Accepted |
+| [0021](0021-eval-apis-accept-either-a-session-or-an-api-key.md) | Eval/dataset APIs accept a session **or** an API key, so CI holds a scoped key | Accepted |
 
 ## Template
 
