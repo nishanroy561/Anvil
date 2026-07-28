@@ -353,3 +353,78 @@ def test_the_api_key_can_come_from_the_environment(tmp_path, monkeypatch):
         code, _ = invoke(["eval", "run", "--dataset", DATASET_ID, "--config", write_config(tmp_path)])
     assert code == cli.EXIT_OK
     assert route.calls[0].request.headers["authorization"] == f"Bearer {KEY}"
+
+
+# ---- output must survive a non-UTF-8 console --------------------------------
+
+
+def cp1252_stream():
+    """A stream that behaves like a Windows console at the default codepage.
+
+    `errors="strict"` is the point: any character cp1252 can't represent raises
+    UnicodeEncodeError on flush, exactly as it did on the real console.
+    """
+    return io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict", newline="")
+
+
+@respx.mock
+def test_full_gate_output_encodes_on_a_cp1252_console(tmp_path):
+    """Regression: the CLI printed U+2192 and U+2014, so the gate died mid-run
+    with UnicodeEncodeError on any Windows console at the default codepage —
+    after the eval had already been paid for.
+
+    The other tests capture to StringIO, which accepts every character and so
+    could never have caught this. Found by the live acceptance run instead.
+    """
+    graders = {
+        "accuracy": {"mean": None, "pass_rate": None, "scored_items": 0, "errored_items": 3},
+        "citation_present": {
+            "mean": 1.0, "pass_rate": 1.0, "scored_items": 3,
+            "errored_items": 0, "tautological_items": 3,
+        },
+    }
+    respx.post(f"{BASE}/v1/eval-runs").mock(return_value=httpx.Response(201, json=run_row()))
+    respx.get(f"{BASE}/v1/eval-runs/{RUN_ID}").mock(
+        return_value=httpx.Response(200, json=run_row(graders=graders))
+    )
+    respx.get(f"{BASE}/v1/eval-runs/compare").mock(
+        return_value=httpx.Response(200, json=comparison("regressed"))
+    )
+
+    out = cp1252_stream()
+    code = cli.main(
+        base_args(write_config(tmp_path), "--wait", "--min-score", "accuracy=0.5",
+                  "--baseline-run", BASELINE_ID),
+        out=out,
+    )
+    # Raises UnicodeEncodeError here if any un-encodable character was written.
+    out.flush()
+
+    assert code == cli.EXIT_GATE_FAILED
+    written = out.buffer.getvalue().decode("cp1252")
+    assert "->" in written, "the arrow should render as ASCII"
+    assert "FAILED" in written
+
+
+def test_the_partial_comparison_notice_encodes_too(tmp_path):
+    """`partial` and `inconclusive` take different branches from the regressed
+    path above, and both were carrying non-ASCII."""
+    out = cp1252_stream()
+    partial = comparison("inconclusive", reason="insufficient_data")
+    partial["partial"] = True
+    cli.check_regressions(partial, out)
+    out.flush()
+    assert "partial" in out.buffer.getvalue().decode("cp1252")
+
+
+def test_a_null_mean_renders_as_ascii(tmp_path):
+    """`_fmt(None)` was an em dash — printed for every grader that errored out,
+    which is precisely when someone is reading the output."""
+    assert cli._fmt(None).isascii()
+    out = cp1252_stream()
+    cli.print_results(
+        {"summary": {"graders": {"g": {"mean": None, "pass_rate": None,
+                                       "scored_items": 0, "errored_items": 2}}}},
+        out,
+    )
+    out.flush()
