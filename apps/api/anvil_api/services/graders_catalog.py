@@ -16,6 +16,8 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+import jsonschema
+
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "graders_catalog.json"
 
 
@@ -28,3 +30,34 @@ def builtin_graders() -> list[dict]:
 @lru_cache
 def builtin_names() -> frozenset[str]:
     return frozenset(g["name"] for g in builtin_graders())
+
+
+@lru_cache
+def _schema_for(name: str) -> str | None:
+    for grader in builtin_graders():
+        if grader["name"] == name:
+            return json.dumps(grader.get("config_schema") or {})
+    return None
+
+
+def validate_grader_config(name: str, config: dict | None) -> str | None:
+    """Returns a human-readable problem with `config`, or None if it is fine.
+
+    This matters more than it looks. Several graders treat a missing config key
+    as a vacuous default — `contains` with no `value` searches for the empty
+    string, which every output contains, so a typo'd key produces a grader that
+    scores a confident 1.0 on everything and measures nothing. A run like that
+    is worse than a failed one: it looks like a pass.
+
+    Unknown graders are not validated — they may be worker-side plugins the API
+    cannot see (see the module docstring).
+    """
+    raw = _schema_for(name)
+    if raw is None:
+        return None
+    try:
+        jsonschema.validate(config or {}, json.loads(raw))
+    except jsonschema.ValidationError as exc:
+        where = ".".join(str(p) for p in exc.absolute_path)
+        return f"{where}: {exc.message}" if where else exc.message
+    return None

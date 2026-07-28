@@ -38,7 +38,32 @@ sitting uncommitted), and the two remaining UI defects are fixed — dataset cel
 that clipped mid-JSON now have a show more/less toggle, and a new amber
 `status-warn` token carries the tautology warnings.
 
-**Test counts after this session: API 96, worker 117.** Both suites green with
+**Phase 6 backend is built and its acceptance passes** (see the Phase 6 section
+below). The `/evals/compare` UI is the remaining half and is **awaiting the
+user's go-ahead**.
+
+**Two gaps closed while running the acceptance:**
+
+1. **`mode="generate"` has now executed against a real provider.** It had only
+   ever run against `"fake-model"` in unit tests. A 3-item run against
+   `gemini-2.5-flash` produced output on 3/3 items, cost `0.000593` through the
+   normal price table. Two things learned: **`gemini-2.5-flash-lite` is retired
+   for new API users** (404 `NOT_FOUND`, "no longer available to new users") —
+   it is still in `pricing.py`, correctly, since existing users keep it, but do
+   not reach for it as the cheap default. And the model wrapped its JSON in
+   markdown fences, so `valid_json` scored 0.0 — the grader is right and the
+   model is the problem, which is a fair advertisement for the product.
+2. **The API never validated grader configs**, despite
+   `services/graders_catalog.py` documenting that it did. Found by falling into
+   it: the acceptance script passed `{"text": ...}` where `contains` wants
+   `{"value": ...}`, and an empty needle matches every string, so **both runs
+   completed with a confident `mean 1.0` having measured nothing**. That is the
+   worst failure shape this product has — a silent pass. `POST /v1/eval-runs`
+   now validates each builtin grader's config against the catalog's JSON Schema
+   and 400s `invalid_grader_config`. Unknown graders stay unvalidated (they may
+   be worker-side plugins the API cannot see).
+
+**Test counts after this session: API 128, worker 117.** Both suites green with
 Postgres/Redis up; `npx tsc --noEmit` clean in `apps/web`.
 
 **UI restyle (2026-07-22, user-directed):** the web app moved from the dark
@@ -470,6 +495,42 @@ API-death scenarios.
       Enter/Space.
    d. **Open (cosmetic):** dataset detail clips expected-output cells mid-JSON
       with no "show more" affordance. Left for a polish pass.
+
+### Phase 6 — comparison & stats (2026-07-28)
+
+**Backend done; acceptance passes. UI not started (needs go-ahead).**
+
+- `apps/api/anvil_api/services/analysis.py` — pure functions over dicts, no ORM
+  and no I/O, which is what lets the tests use hand-computed fixtures. Paired
+  bootstrap (10k resamples, fixed seed so a page refresh doesn't move the
+  interval), exact McNemar over discordant pairs for graders whose scores are
+  all 0/1, latency and cost deltas. In the API because compare is synchronous
+  and the API must not import from `apps/worker` (ADR-0014).
+- **The refusals are the substance.** A grader returns `inconclusive` with a
+  `reason` for: `no_paired_scores`, `insufficient_data` (n < 30),
+  `ci_contains_zero`, and `tautological` (both sides graded against their own
+  output — ADR-0018; a zero delta there would report "no regression" when
+  nothing was measured). Grader errors drop the pair rather than scoring 0, so
+  a provider timeout can't invent a regression.
+- `GET /v1/eval-runs/compare?a=&b=` — **declared before `/eval-runs/{run_id}`**;
+  FastAPI matches in declaration order and the other way round parses "compare"
+  as a run id and 422s. There is a regression test pinning this. Runs over
+  different datasets 400 `datasets_differ`; other tenants 404.
+- `numpy` is a new API dependency. **pandas deliberately is not** — the spec's
+  "(Pandas/NumPy)" is a toolset note, and this is vectorized array math with no
+  dataframe in it. Same class of deliberate deviation as the TS SDK's
+  `fetchImpl` over msw.
+- Tests: 28 new (`test_analysis.py` 18, `test_compare.py` 10). Includes the
+  n < 30 boundary at 29/30, noise straddling zero, a run compared with itself
+  reading `inconclusive` rather than "no regression", McNemar against
+  hand-computed values (`2·11/1024`, `2/2³`), and CI reproducibility.
+- **Acceptance: `python scripts/compare_acceptance.py` → PASSED**, against a
+  live API + worker. n=40 real shift → `regressed`, delta −1.0, CI [−1.0, −1.0],
+  p = 1.82e-12 (= 2/2⁴⁰, hand-checkable); the same shift at n=5 →
+  `inconclusive` / `insufficient_data`, p = 0.0625 (= 2/2⁵); a run against
+  itself → `inconclusive`. **No judge credits spent** — the shift is built from
+  the deterministic `contains` grader, since the statistics don't care where
+  scores come from.
 
 ## What exists
 

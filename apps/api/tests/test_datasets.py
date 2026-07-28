@@ -356,3 +356,61 @@ async def test_graders_endpoint_drives_the_ui_picker(tenant):
 
 async def test_graders_endpoint_requires_a_session(client):
     assert (await client.get("/v1/graders")).status_code == 401
+
+
+# ---- grader config validation ----------------------------------------------
+
+
+async def test_invalid_grader_config_is_refused_at_creation(tenant):
+    """`contains` with no `value` searches for the empty string, which every
+    output contains — the run would complete with a confident 1.0 having
+    measured nothing. A silent pass is worse than a failure, so it 400s."""
+    dataset = await make_dataset_with_items(tenant)
+
+    res = await tenant.client.post(
+        "/v1/eval-runs",
+        json=run_body(dataset["id"], graders=[{"name": "contains", "config": {}}]),
+    )
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"]["code"] == "invalid_grader_config"
+
+
+async def test_a_misspelled_config_key_is_refused(tenant):
+    """The catalog sets additionalProperties:false, so `text` instead of
+    `value` is caught rather than silently ignored."""
+    dataset = await make_dataset_with_items(tenant)
+
+    res = await tenant.client.post(
+        "/v1/eval-runs",
+        json=run_body(
+            dataset["id"], graders=[{"name": "contains", "config": {"text": "sorry"}}]
+        ),
+    )
+    assert res.status_code == 400
+    assert "contains" in res.json()["detail"]["message"]
+
+
+async def test_a_valid_grader_config_is_accepted(tenant):
+    dataset = await make_dataset_with_items(tenant)
+    res = await tenant.client.post(
+        "/v1/eval-runs",
+        json=run_body(
+            dataset["id"], graders=[{"name": "contains", "config": {"value": "sorry"}}]
+        ),
+    )
+    assert res.status_code == 201, res.text
+
+
+async def test_an_unknown_grader_is_not_config_validated(tenant):
+    """It may be a plugin installed only in the worker image, whose schema the
+    API cannot see. Accepted with a warning; a grader the worker can't resolve
+    fails at the item level, which is already a supported outcome."""
+    dataset = await make_dataset_with_items(tenant)
+    res = await tenant.client.post(
+        "/v1/eval-runs",
+        json=run_body(
+            dataset["id"],
+            graders=[{"name": "house_style", "config": {"anything": True}}],
+        ),
+    )
+    assert res.status_code == 201, res.text

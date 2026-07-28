@@ -29,7 +29,7 @@ from ..schemas.evaluation import (
     RunComparison,
 )
 from ..services.analysis import compare_runs
-from ..services.graders_catalog import builtin_graders, builtin_names
+from ..services.graders_catalog import builtin_graders, builtin_names, validate_grader_config
 from ..streams import EVAL_JOBS_STREAM
 
 log = logging.getLogger(__name__)
@@ -112,6 +112,21 @@ async def create_eval_run(
     if unknown:
         # Not an error: the worker may have plugins the API can't see.
         log.info("eval run requests non-builtin graders %s (plugin?)", unknown)
+
+    # Rejected here rather than at grading time, because several graders treat a
+    # missing key as a vacuous default: `contains` with no `value` looks for the
+    # empty string and scores 1.0 on every item. That run completes, reports a
+    # perfect mean, and measured nothing — a silent pass is worse than a failure.
+    for grader in body.graders:
+        problem = validate_grader_config(grader.name, grader.config)
+        if problem:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "invalid_grader_config",
+                    "message": f"Config for grader '{grader.name}' is invalid — {problem}",
+                },
+            )
 
     if body.target.mode == "generate" and not body.target.model:
         raise HTTPException(
