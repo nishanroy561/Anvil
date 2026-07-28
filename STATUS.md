@@ -4,7 +4,52 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-28 (Phases 6 and 7 complete)
+Last updated: 2026-07-28 (Phases 6, 7 and 8 complete)
+
+## Phase 8 — monitors & alerts (2026-07-28). DONE, acceptance passes.
+
+- **`sampler.py`** grades live traffic on each monitor's cron. Three things
+  carry the weight: a trace is scored **at most once per monitor** (the
+  candidate query anti-joins `monitor_scores`, so a 10-minute monitor over a
+  2-hour lookback does not re-grade and re-charge the same traffic twelve
+  times); `last_run_at` is claimed with a **conditional UPDATE** before any
+  grading, so two workers ticking in the same second cannot both pay for one
+  run; cron is UTC, and an *unparseable* cron makes a monitor not-due rather
+  than always-due — the other default turns a typo into a judge loop.
+- **`alerter.py`** evaluates rules over a trailing window. No re-fire while an
+  event is open. The event row is **committed before any channel is called**, so
+  a dead webhook leaves `notified=false` — degraded and visible — instead of an
+  alert that never existed. Grader errors are excluded from `eval_score` rather
+  than averaged in as zeros, or a broken judge pages someone about a quality
+  regression.
+- **`channels.py`** is the third registry on the plugins.md contract, webhook as
+  the built-in. One channel failing or hanging never costs the alert its others.
+- API validates the two things that fail *silently*: an unparseable cron (a
+  monitor that never runs looks exactly like one finding nothing wrong) and a
+  grader config (`contains` with no value scores 1.0 forever).
+- **`demo seed --drift`** degrades the answers without raising the error rate.
+  Traces still come back `ok` and still cost money — nothing but grading
+  notices, which is the whole argument for monitors.
+- **UI** (after go-ahead): `/monitors` — cards with a drift chart, enable/disable,
+  and lowest-scoring samples linked to their traces; the create form is
+  registry-driven and warns when a **judge** is picked, since a monitor spends
+  credits on a schedule, unattended, forever. `/alerts` — rule CRUD in plain
+  language ("Eval score is below 0.5 over 120 min"), webhook config, and event
+  history with a firing/resolved state and a "not delivered" marker.
+- **Acceptance: `python scripts/drift_alert_acceptance.py` → PASSED**, 18 checks.
+  Healthy traffic scores 1.0 and does not alert; drifted traffic scores 0.286,
+  fires within one cycle, and a **real local HTTP server receives the webhook**
+  carrying the rule and breaching value; a second cycle does not duplicate;
+  recovery resolves and delivers `alert.resolved`. Runs the loops in-process so
+  cycle boundaries are deterministic — waiting 60 s to observe "fires within one
+  cycle" makes a flaky test, not a stronger one.
+
+**One UI thing worth knowing:** the drift chart is width-capped (`max-w-2xl`)
+on purpose. Stretched across a full-width card, even a 1.00 → 0.00 collapse
+renders as a shallow near-horizontal line and reads as flat — I mistook it for
+a missing line until I read the SVG path (`M42,6L1614,130`, correct all along).
+A drift chart that makes a collapse look flat is worse than no chart.
+
 
 ## Phase 7 — CI gating (2026-07-28). DONE, acceptance passes.
 
@@ -124,7 +169,7 @@ section below.
    and 400s `invalid_grader_config`. Unknown graders stay unvalidated (they may
    be worker-side plugins the API cannot see).
 
-**Test counts: API 138, worker 125, Python SDK 57.** All green with
+**Test counts: API 156, worker 156, Python SDK 60, demo 6.** All green with
 Postgres/Redis up; `npx tsc --noEmit` and `npm run build` clean in `apps/web`.
 
 **UI restyle (2026-07-22, user-directed):** the web app moved from the dark
@@ -162,7 +207,8 @@ against Gemini at the unit level; the judged full-stack rerun is still to do.
 See "Phase 5 gaps" #1.** User gave the Phase 5 UI go-ahead.
 **Phase 6 (comparison & stats): DONE** — acceptance passes.
 **Phase 7 (CI gating): DONE** — acceptance passes.
-Phases 8–11: not started (stubs with spec pointers exist).
+**Phase 8 (monitors & alerts): DONE** — acceptance passes.
+Phases 9–11: not started (stubs with spec pointers exist).
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -679,14 +725,11 @@ API-death scenarios.
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
    trace for jank. Worth a look at `/evals/compare` while there.
-2. **Phase 8 — monitors & alerts** (plan/evaluation.md §6): `sampler.py` and
-   `alerter.py` are 6-line stubs. Needs monitor CRUD + UI, the sampling loop,
-   alert rules, the webhook channel, and `--drift` in the demo seeder.
-3. **Phase 9 — feedback loop** (plan/evaluation.md §7): the `ingest:feedback`
+2. **Phase 9 — feedback loop** (plan/evaluation.md §7): the `ingest:feedback`
    stream is declared in both `streams.py` files with no consumer, and
-   `client.feedback()` is missing from both SDKs. 8 and 9 are independent — do
-   them in either order.
-4. Then 10 (retention) and 11 (hardening) per plan.md's phase table.
+   `client.feedback()` is missing from both SDKs. Also needs the failure inbox
+   and a thumbs-down button in the demo app.
+3. Then 10 (retention) and 11 (hardening) per plan.md's phase table.
 
 **Backfill worth doing at some point:** items promoted before ADR-0018 have no
 `metadata.recorded_output`, so their reference-comparing scores come back

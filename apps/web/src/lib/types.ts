@@ -245,3 +245,64 @@ export interface TruncationMarker {
 export function isTruncationMarker(v: unknown): v is TruncationMarker {
   return typeof v === "object" && v !== null && (v as Record<string, unknown>).anvil_truncated === true;
 }
+
+// ---- monitors & alerts (Phase 8) -------------------------------------------
+
+export interface Monitor {
+  id: string;
+  project_id: string;
+  name: string;
+  sample_rate: number;
+  schedule_cron: string;
+  grader_config: { graders: { name: string; config: Record<string, unknown> }[] } | null;
+  enabled: boolean;
+  last_run_at: string | null;
+  created_at: string;
+}
+
+export interface MonitorSample {
+  id: string;
+  monitor_id: string;
+  trace_id: string;
+  scores: Record<string, { score?: number; detail?: Record<string, unknown>; error?: string }> | null;
+  created_at: string;
+}
+
+export interface ScoreBucket {
+  bucket: string;
+  /** Null when every sample in the bucket errored — not zero. */
+  mean_score: number | null;
+  samples: number;
+}
+
+export interface MonitorScoreSeries {
+  buckets: ScoreBucket[];
+  graders: string[];
+}
+
+export type AlertMetric = "error_rate" | "cost" | "latency_p95" | "eval_score";
+export type AlertComparison = "gt" | "lt" | "gte" | "lte";
+
+export interface AlertRule {
+  id: string;
+  project_id: string;
+  name: string;
+  metric: AlertMetric;
+  comparison: AlertComparison;
+  threshold: number;
+  window_minutes: number;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface AlertEvent {
+  id: string;
+  rule_id: string;
+  rule_name: string | null;
+  metric: string | null;
+  fired_at: string;
+  value: number;
+  resolved_at: string | null;
+  /** False means it fired but a channel could not be reached. */
+  notified: boolean;
+}

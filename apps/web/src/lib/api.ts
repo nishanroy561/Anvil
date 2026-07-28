@@ -5,6 +5,10 @@
  */
 
 import type {
+  AlertEvent,
+  AlertComparison,
+  AlertMetric,
+  AlertRule,
   ApiKey,
   Dataset,
   DatasetItem,
@@ -12,6 +16,9 @@ import type {
   EvalRun,
   GraderInfo,
   MetricsOverview,
+  Monitor,
+  MonitorSample,
+  MonitorScoreSeries,
   Project,
   RunComparison,
   TraceDetail,
@@ -208,3 +215,80 @@ export const metricsOverview = (projectId: string, opts: { since?: string; inter
   const qs = params.toString();
   return request<MetricsOverview>(`/v1/projects/${projectId}/metrics/overview${qs ? `?${qs}` : ""}`);
 };
+
+// ---- monitors & alerts (Phase 8) -------------------------------------------
+
+export const listMonitors = (projectId: string) =>
+  request<Monitor[]>(`/v1/projects/${projectId}/monitors`);
+
+export const createMonitor = (
+  projectId: string,
+  body: {
+    name: string;
+    sample_rate: number;
+    schedule_cron: string;
+    graders: { name: string; config: Record<string, unknown> }[];
+  },
+) =>
+  request<Monitor>(`/v1/projects/${projectId}/monitors`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const updateMonitor = (
+  monitorId: string,
+  body: Partial<{
+    name: string;
+    sample_rate: number;
+    schedule_cron: string;
+    enabled: boolean;
+    graders: { name: string; config: Record<string, unknown> }[];
+  }>,
+) => request<Monitor>(`/v1/monitors/${monitorId}`, { method: "PATCH", body: JSON.stringify(body) });
+
+export const deleteMonitor = (monitorId: string) =>
+  request<void>(`/v1/monitors/${monitorId}`, { method: "DELETE" });
+
+export const monitorScores = (monitorId: string, days = 14) =>
+  request<MonitorScoreSeries>(`/v1/monitors/${monitorId}/scores?days=${days}`);
+
+export const monitorSamples = (monitorId: string, limit = 50) =>
+  request<MonitorSample[]>(`/v1/monitors/${monitorId}/samples?limit=${limit}`);
+
+export const listAlertRules = (projectId: string) =>
+  request<AlertRule[]>(`/v1/projects/${projectId}/alert-rules`);
+
+export const createAlertRule = (
+  projectId: string,
+  body: {
+    name: string;
+    metric: AlertMetric;
+    comparison: AlertComparison;
+    threshold: number;
+    window_minutes: number;
+  },
+) =>
+  request<AlertRule>(`/v1/projects/${projectId}/alert-rules`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const updateAlertRule = (ruleId: string, body: Partial<AlertRule>) =>
+  request<AlertRule>(`/v1/alert-rules/${ruleId}`, { method: "PATCH", body: JSON.stringify(body) });
+
+export const deleteAlertRule = (ruleId: string) =>
+  request<void>(`/v1/alert-rules/${ruleId}`, { method: "DELETE" });
+
+export const listAlertEvents = (projectId: string, activeOnly = false) =>
+  request<AlertEvent[]>(
+    `/v1/projects/${projectId}/alert-events${activeOnly ? "?active=true" : ""}`,
+  );
+
+export const getAlertWebhook = (projectId: string) =>
+  request<{ alert_webhook_url: string | null }>(`/v1/projects/${projectId}/alert-webhook`);
+
+export const setAlertWebhook = (projectId: string, url: string | null) =>
+  request<{ alert_webhook_url: string | null }>(`/v1/projects/${projectId}/alert-webhook`, {
+    method: "PATCH",
+    body: JSON.stringify({ alert_webhook_url: url }),
+  });
