@@ -34,10 +34,11 @@ eyes on :3000.** User gave the UI go-ahead this session.
 "Phase 5 gaps" below. Backend (51 new tests) + UI are built, and the acceptance
 loop ran over live HTTP: promote 10 demo traces → dataset → run with
 valid_json/exact_match/length_bounds/accuracy → live progress → per-item scores
-+ summary. But the *judged* half of that criterion has never actually scored:
-this box has no ANTHROPIC_API_KEY, so `accuracy` recorded "no judge key
-configured" ×10 (correctly excluded from means — mean=None, not 0).** User gave
-the Phase 5 UI go-ahead.
++ summary. The *judged* half of that criterion scored nothing at the time —
+`accuracy` recorded "no judge key configured" ×10 (correctly excluded from
+means — mean=None, not 0). As of 2026-07-24 the live judge call is proven
+against Gemini at the unit level; the judged full-stack rerun is still to do.
+See "Phase 5 gaps" #1.** User gave the Phase 5 UI go-ahead.
 Phases 6–11: not started (stubs with spec pointers exist).
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
@@ -191,6 +192,15 @@ API-death scenarios.
   customer checks to answer "is Anvil losing my data?". Both SDKs now count
   in-flight traces as queued; regression tests in each. Found by watching the
   live kill test, not by the unit suite.
+- **The Gemini free tier is small enough to hit inside one eval run.** A second
+  10-item judged run on the same day died partway with `RESOURCE_EXHAUSTED`
+  (`generate_content_free_tier_requests`), ~16 calls in. Handled correctly and
+  worth seeing: 429 is retryable, the backoff exhausted, 4 items recorded
+  grader errors, the run still **completed**, and the aggregation rule excluded
+  them (`mean 1.0` over `scored_items 6`, `errored_items 4`) rather than
+  averaging zeros. Budget for it when planning Phase 6's two-run comparison —
+  that needs ~2× the judged calls and will not fit in a free-tier day alongside
+  other runs.
 - Ajv's default build is draft-07; the shared schema is draft 2020-12, so the TS
   tests import `ajv/dist/2020.js`. The default import fails with a confusing
   "no schema with key or ref .../2020-12/schema".
@@ -307,20 +317,124 @@ API-death scenarios.
 
 ### Phase 5 gaps (do these before calling the phase done)
 
-1. **The live judge path has never executed.** Every judge test injects a fake
-   model through `GradeContext.model_factory`, and the acceptance run had no
-   key, so the real
-   `ChatAnthropic(...).with_structured_output(Verdict).ainvoke()` call has
-   never run once. evaluation.md §2's acceptance names judged `accuracy`
-   explicitly. Set `ANTHROPIC_API_KEY` on the worker and re-run
-   `acceptance-golden` to close this — a bug in `_build_model` would only
-   surface there.
-2. **Judge tracing / dogfooding is not implemented** (evaluation.md §2: judge
-   calls traced with the Anvil Python SDK into a designated internal project).
-   The worker has no `anvil-sdk` dependency and no internal-project config.
-   Deferred deliberately, not half-built.
-3. **No visual pass on the Phase 5 UI** — pages are confirmed to render 200 and
-   typecheck, not to *look* right. Same outstanding item as Phase 4.
+1. ~~**The live judge path has never executed.**~~ **CLOSED — and this gap's
+   text was already stale when written.** The eval-run history in the dev DB
+   shows the judge ran live on **2026-07-21**, in the Phase 5 session itself:
+   `judged-acceptance (gemini)` (18:09, `gemini-2.5-flash`, 7 scored / 3
+   errored, cost 0.0) and `judged-acceptance v2 (budget+cost)` (18:15, 7 scored
+   / 3 errored, **cost 0.004256**). The run that gap #1 actually described is
+   the earlier `acceptance-run` (16:22), whose `accuracy` config named **no
+   model** — so ADR-0016's fixed order resolved it to the box's dead Anthropic
+   key and all 10 items errored. The conclusion drawn from it ("the real
+   `ainvoke()` has never run once") was wrong by the end of that same session,
+   and nobody corrected it. **Check the run history before trusting a claim
+   like this again.**
+   Re-verified 2026-07-24 anyway, which was worth doing for the two pieces the
+   Jul 21 runs don't evidence. A keyless-path unit check with no `model_factory`
+   injected — `build_chat_model → with_structured_output(Verdict,
+   include_raw=True) → ainvoke()` through `run_grader("accuracy", …)` — scored
+   a matching answer 1.0 and a contradicting one 0.0, which is the only
+   evidence anywhere that the judge *discriminates* rather than returning a
+   constant. And a full-stack run (`judged-acceptance-1784852084`, id
+   `d2ed23c7`) completed 10/10 with `errored_items 0` and `total_cost_usd
+   0.006571`.
+   **Read those 1.0 means with care:** they are `rescore` runs over promoted items, so
+   `expected_output` was copied from the very output being graded and a perfect
+   score is near-tautological. They demonstrate the *pipeline*, not judge
+   quality. The discrimination evidence is the smoke test above (1.0 vs 0.0),
+   not any of these runs. A run that would genuinely exercise judgement needs
+   either `mode="generate"` against a real target model or hand-edited expected
+   outputs — worth doing when Phase 6 needs two runs that actually differ.
+   Note when configuring any judged run: both keys are set in `.env`, and
+   ADR-0016's fixed order puts Anthropic first, so a judge with **no model
+   named** resolves to the dead Anthropic key and reproduces the original gap.
+   Name `gemini-2.5-flash` explicitly.
+   Prereq now in place: `apps/worker/pyproject.toml` gained a `[judges]` extra
+   (`langchain-anthropic`, `langchain-google-genai`, `python-dotenv`) — the
+   provider packages were previously not declared anywhere and so were
+   uninstallable; `.env.example` documented a nonexistent `OPENAI_API_KEY` and
+   omitted `GOOGLE_API_KEY`. Both fixed.
+2. ~~**Judge tracing / dogfooding is not implemented.**~~ **Done 2026-07-24 —
+   see ADR-0017.** `apps/worker/anvil_worker/dogfood.py` traces every judge call
+   through the Anvil Python SDK into the project named by
+   `ANVIL_INTERNAL_API_KEY` (`ANVIL_INTERNAL_BASE_URL` aims it). Opt-in: unset
+   is the default and does nothing, so the keyless suite and a bare checkout are
+   unaffected. Shape is one trace per judge call, `judge:<grader>`, wrapping one
+   `llm` span named after the model — tokens live on spans, so the two levels
+   are what make judge spend visible at all. The trace covers the whole call
+   *including retries*. A dedicated `AnvilClient` is passed explicitly rather
+   than `anvil.init()`, so nothing else in the worker can accidentally ship.
+   Every failure path (no SDK, construction raising, SDK raising, dead API)
+   degrades to an inert recorder — 12 tests in `tests/test_dogfood.py` pin that
+   telemetry can never change a score.
+   **Verified live**, not just unit-tested: a judged run against the new
+   `Anvil Internal` project produced 10 `judge:accuracy` traces whose statuses
+   matched the run exactly (6 ok / 4 errored), carrying the prompt, the verdict,
+   the provider's own 429 text on the failures, and on the successes
+   `total_tokens 190/245` → `total_cost_usd 0.000669` through the normal
+   `derive.py` roll-up.
+   Note: `anvil-sdk` is imported lazily and is *not* a declared worker
+   dependency — it is unpublished and installs in-tree
+   (`pip install -e sdks/python`). A key set with no SDK present logs a warning
+   rather than failing silently.
+3. **Visual pass done 2026-07-24** (Chrome, signed in as the demo user), for
+   both the Phase 4 leftover and the Phase 5 pages. **Awaiting the user's own
+   sign-off** — this was an agent's eyes, not a human's.
+
+   **Phase 4 acceptance criterion passes.** On the 103-span
+   `acceptance_100_spans` trace: proportions correct (`stage_0` at 11.00 s ends
+   exactly on the 12 s gridline, `stage_1` starts there, `chain_*_9` at 6.50 s
+   is visibly ~⅗ of an 11 s bar), nesting/indentation correct, the five span
+   types colour-distinct, duration labels flipping to the left of bars near the
+   right edge, and **no jank** scrolling the full 103 rows. `background_flush`
+   renders "still running…" with a fading gradient; the span panel shows type,
+   id, timing, input and output.
+
+   **Phase 5 pages read well.** The eval-run detail is the strongest: summary
+   cards show `1.00` *and* `4 errored` in red side by side rather than hiding
+   failures, errored rows carry ~38 s latency (visibly the retry backoff), and
+   expanding a scored row shows judge reasoning plus pretty-printed full output.
+
+   Four defects found. **(a), (b) and (c) are fixed and verified; (d) is
+   logged.**
+
+   a. **FIXED.** *The orphan badge could never render for ingested data.*
+      `waterfall.ts:64`
+      sets `orphan` only when `parent_span_id` is *set but unresolvable*, while
+      Phase 2 ingest normalization **nulls dangling parents** before storage
+      (`test_normalize.py`). Verified on the acceptance trace: the deliberately
+      orphaned `orphaned_callback` span arrives with `parent_span_id=None`, so
+      it renders as a plain root with no badge. Two individually correct
+      behaviours cancelling out — the server repairs the damage and destroys the
+      evidence, so "had a parent we never saw" is indistinguishable from "is a
+      root". Fixed on the ingest side, where the information still exists:
+      `normalize.py` now sets `anvil_orphaned` on the span's attributes as it
+      nulls the link (same convention as `anvil_clock_adjusted`), and
+      `waterfall.ts` badges on that flag *or* the original client-side check —
+      so payloads that bypass normalization keep working. Three tests in
+      `test_normalize.py` cover dangling, self- and cyclic parents plus the
+      case that matters most: a **genuine root is not marked**, or the badge
+      cries wolf on every trace. Verified end to end with a freshly ingested
+      `orphan_badge_check` trace — the badge appears on `lost_parent_span` and
+      on neither the real root nor its valid child.
+   b. **FIXED.** *Grader-level errors were unreachable in the UI.* In
+      `evals/[runId]/page.tsx:60`, `hasDetail` counted only `result.error` (the
+      *item* failed) and judge reasoning — not `result.scores[name].error` (a
+      *grader* failed). So the four 429-failed rows get no chevron and don't
+      expand, and the expanded panel (lines 104–135) has no branch to render
+      grader errors anyway. The provider's message survived only as a `title`
+      tooltip on the `err` cell — a ~400-char error in a native tooltip, i.e.
+      the most diagnostic thing in the run was the hardest thing to read.
+      `hasDetail` now also counts `scores[*].error`, and the expanded panel
+      renders each as "<grader> — grader error". Verified: the four 429 rows
+      expand and show the full `RESOURCE_EXHAUSTED` text.
+   c. **FIXED** (folded into b). Result rows expanded via `onClick` on a bare
+      `<tr>` — no role, `tabIndex`, or key handler, so the only route to a
+      judge's reasoning was invisible to the accessibility tree and unusable by
+      keyboard. Now `role="button"`, `tabIndex`, `aria-expanded`, and
+      Enter/Space.
+   d. **Open (cosmetic):** dataset detail clips expected-output cells mid-JSON
+      with no "show more" affordance. Left for a polish pass.
 
 ## What exists
 

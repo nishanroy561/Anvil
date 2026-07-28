@@ -117,11 +117,19 @@ def _keyless(monkeypatch):
     into the shell. A test that wants a provider injects a fake through
     `model_factory`.
     """
-    from anvil_worker import providers
+    from anvil_worker import dogfood, providers
 
     monkeypatch.setattr(providers, "_env_loaded", True)
     for env_var, _prefixes, _default in providers.PROVIDERS:
         monkeypatch.delenv(env_var, raising=False)
+
+    # Judge tracing is a network client, not a provider, but it leaks the same
+    # way: a developer's `.env` carries a real internal key, and the suite would
+    # ship test judge traces into a live project. Off, and memoisation cleared
+    # so an enabling test can't leave a client behind for the next one.
+    monkeypatch.delenv(dogfood.API_KEY_ENV, raising=False)
+    monkeypatch.setattr(dogfood, "_client", None)
+    monkeypatch.setattr(dogfood, "_resolved", False)
 
 
 @pytest.fixture

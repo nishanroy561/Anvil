@@ -11,6 +11,7 @@ import signal
 import redis.asyncio as redis
 from prometheus_client import start_http_server
 
+from . import dogfood
 from .config import get_settings
 from .eval_runner import EvalRunner
 from .graders import load_graders
@@ -65,6 +66,8 @@ async def main() -> None:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         await client.aclose()
+        # Ships whatever judge traces are still queued before the process goes.
+        dogfood.reset()
 
 
 if __name__ == "__main__":

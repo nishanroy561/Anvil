@@ -57,7 +57,16 @@ function SummaryCards({ run }: { run: EvalRun }) {
 function ResultRow({ result, graderNames }: { result: EvalResult; graderNames: string[] }) {
   const [open, setOpen] = useState(false);
   const reasoning = result.judge_reasoning ?? {};
-  const hasDetail = Object.keys(reasoning).length > 0 || result.error !== null;
+  // A *grader* failing is not the same as the *item* failing, and it is the
+  // more common case: a provider 429 errors one grader while the item's other
+  // graders score fine. Both have to open the row, or the provider's own
+  // message is reachable only as a tooltip.
+  const graderErrors = Object.entries(result.scores ?? {}).flatMap(([name, entry]) =>
+    entry?.error ? [[name, entry.error] as const] : [],
+  );
+  const hasDetail =
+    Object.keys(reasoning).length > 0 || result.error !== null || graderErrors.length > 0;
+  const toggle = () => setOpen((v) => !v);
 
   return (
     <>
@@ -66,7 +75,22 @@ function ResultRow({ result, graderNames }: { result: EvalResult; graderNames: s
           "border-b border-line/50 align-top transition-colors duration-150",
           hasDetail && "cursor-pointer hover:bg-iron-850",
         )}
-        onClick={hasDetail ? () => setOpen((v) => !v) : undefined}
+        onClick={hasDetail ? toggle : undefined}
+        // Expanding is the only way to read a judge's reasoning or a grader
+        // error, so it cannot be mouse-only.
+        role={hasDetail ? "button" : undefined}
+        tabIndex={hasDetail ? 0 : undefined}
+        aria-expanded={hasDetail ? open : undefined}
+        onKeyDown={
+          hasDetail
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggle();
+                }
+              }
+            : undefined
+        }
       >
         <td className="px-4 py-2">
           <pre className="max-h-16 overflow-hidden whitespace-pre-wrap break-words font-mono text-2xs leading-relaxed text-ink-muted">
@@ -114,6 +138,16 @@ function ResultRow({ result, graderNames }: { result: EvalResult; graderNames: s
                 </pre>
               </div>
             )}
+            {graderErrors.map(([grader, message]) => (
+              <div key={grader} className="mb-3">
+                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-status-error">
+                  {grader} — grader error
+                </h4>
+                <pre className="whitespace-pre-wrap break-words font-mono text-2xs text-status-error">
+                  {message}
+                </pre>
+              </div>
+            ))}
             {Object.entries(reasoning).map(([grader, text]) => (
               <div key={grader} className="mb-3 last:mb-0">
                 <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-ink-faint">

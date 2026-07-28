@@ -17,6 +17,11 @@ from typing import Any
 TRUNCATED_FLAG = "anvil_truncated"
 ORIGINAL_BYTES = "original_bytes"
 CLOCK_ADJUSTED_FLAG = "anvil_clock_adjusted"
+# Set when a span's parent link was nulled below. Without it the repair is
+# lossy in a way that matters: a span whose parent never arrived becomes
+# indistinguishable from a genuine root, and the dashboard cannot tell the
+# operator that part of their trace is missing.
+ORPHANED_FLAG = "anvil_orphaned"
 
 # How much of an oversized field we keep. Enough to recognize the payload in the
 # waterfall without storing the multi-MB blob that tripped the limit.
@@ -74,9 +79,23 @@ def _parse_ts(value: Any) -> datetime | None:
         return None
 
 
+def _orphan(span: dict) -> None:
+    """Nulls a span's parent link and flags that it once had one."""
+    span["parent_span_id"] = None
+    attributes = span.get("attributes") or {}
+    if isinstance(attributes, dict):
+        attributes[ORPHANED_FLAG] = True
+        span["attributes"] = attributes
+
+
 def _null_bad_parents(spans: list[dict]) -> int:
     """A `parent_span_id` that names no span in this trace, points at itself, or
-    sits in a cycle is nulled — the span becomes root-level, not an error."""
+    sits in a cycle is nulled — the span becomes root-level, not an error.
+
+    The span is flagged as it is repaired. Nulling alone destroys the evidence:
+    downstream, "my parent never arrived" and "I am a root" look identical, so
+    the waterfall could never surface a dropped parent to the operator.
+    """
     ids = {s.get("id") for s in spans}
     parent_of = {s.get("id"): s.get("parent_span_id") for s in spans}
     repaired = 0
@@ -86,7 +105,7 @@ def _null_bad_parents(spans: list[dict]) -> int:
         if parent is None:
             continue
         if parent not in ids or parent == span.get("id"):
-            span["parent_span_id"] = None
+            _orphan(span)
             repaired += 1
             continue
         # Walk to a root; if we revisit a node, this span sits in a cycle.
@@ -94,7 +113,7 @@ def _null_bad_parents(spans: list[dict]) -> int:
         cursor = parent
         while cursor is not None:
             if cursor in seen:
-                span["parent_span_id"] = None
+                _orphan(span)
                 repaired += 1
                 break
             seen.add(cursor)

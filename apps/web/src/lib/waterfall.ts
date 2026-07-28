@@ -10,7 +10,7 @@ export interface WaterfallRow {
   span: Span;
   depth: number;
   children: WaterfallRow[];
-  orphan: boolean; // parent id set but unresolvable — rendered at root level
+  orphan: boolean; // had a parent we never received — rendered at root level
   startMs: number; // offset from trace t0
   endMs: number; // offset from t0; open-ended spans run to the trace edge
   openEnded: boolean;
@@ -21,6 +21,14 @@ export interface WaterfallModel {
   rows: WaterfallRow[]; // depth-first flattening, render order
   totalMs: number; // trace extent, ≥ 1 to keep division safe
   hottestSpanId: string | null; // longest closed span — the ember highlight
+}
+
+/** Ingest sets this when it nulls a dangling, self- or cyclic parent link. */
+const ORPHANED_FLAG = "anvil_orphaned";
+
+function markedOrphan(span: Span): boolean {
+  const attributes = span.attributes;
+  return Boolean(attributes && typeof attributes === "object" && ORPHANED_FLAG in attributes);
 }
 
 export function buildWaterfall(trace: TraceDetail): WaterfallModel {
@@ -61,7 +69,12 @@ export function buildWaterfall(trace: TraceDetail): WaterfallModel {
   for (const node of Array.from(nodes.values())) {
     const pid = node.span.parent_span_id;
     if (pid === null || pid === node.span.id || !byId.has(pid)) {
-      node.orphan = pid !== null && pid !== node.span.id && !byId.has(pid);
+      // Ingest normalization nulls a bad parent *before* we ever see it, so a
+      // dangling id only survives to the client for payloads that bypassed it.
+      // The `anvil_orphaned` flag it leaves behind is what catches the normal
+      // case; checking both means neither path silently loses the badge.
+      node.orphan =
+        markedOrphan(node.span) || (pid !== null && pid !== node.span.id && !byId.has(pid));
       roots.push(node);
       continue;
     }

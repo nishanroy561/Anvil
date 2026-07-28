@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from anvil_api.services.normalize import (
     CLOCK_ADJUSTED_FLAG,
     ORIGINAL_BYTES,
+    ORPHANED_FLAG,
     TRUNCATED_FLAG,
     normalize_trace,
 )
@@ -155,3 +156,29 @@ def test_valid_nesting_is_preserved():
     assert root["parent_span_id"] is None
     assert child["parent_span_id"] == A
     assert grandchild["parent_span_id"] == B
+
+
+def test_a_repaired_parent_leaves_a_marker():
+    """Nulling alone is lossy: downstream, "my parent never arrived" and "I am a
+    root" become the same thing, and the waterfall can't tell the operator that
+    part of their trace went missing."""
+    orphan = _span(A, parent=MISSING)
+    normalize_trace(_trace(spans=[orphan]), MAX_FIELD)
+    assert orphan["attributes"][ORPHANED_FLAG] is True
+
+
+def test_self_and_cyclic_repairs_are_marked_too():
+    selfish, first, second = _span(A, parent=A), _span(B, parent=C), _span(C, parent=B)
+    normalize_trace(_trace(spans=[selfish, first, second]), MAX_FIELD)
+    assert selfish["attributes"][ORPHANED_FLAG] is True
+    broken = [s for s in (first, second) if s["parent_span_id"] is None]
+    assert broken and all(s["attributes"][ORPHANED_FLAG] is True for s in broken)
+
+
+def test_a_genuine_root_is_not_marked_an_orphan():
+    """The flag has to mean "had a parent we lost", or the badge cries wolf on
+    every trace's root span."""
+    root, child = _span(A), _span(B, parent=A)
+    normalize_trace(_trace(spans=[root, child]), MAX_FIELD)
+    assert ORPHANED_FLAG not in (root.get("attributes") or {})
+    assert ORPHANED_FLAG not in (child.get("attributes") or {})

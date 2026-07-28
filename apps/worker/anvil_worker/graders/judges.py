@@ -13,10 +13,9 @@ Three rules shape everything here:
 - **Provider 429s are retried with jittered backoff** (checklist row 10); after
   the last attempt the item records an error and the run continues.
 
-NOT YET IMPLEMENTED: evaluation.md §2 also calls for judge calls to be traced
-with the Anvil Python SDK into a designated internal project (dogfooding). That
-needs the worker to depend on `anvil-sdk` and a configured internal project, so
-it is deliberately deferred rather than half-built — see STATUS.md.
+- **Judge calls are themselves traced** into a designated internal project
+  (evaluation.md §2's dogfooding), off unless `ANVIL_INTERNAL_API_KEY` is set.
+  See `dogfood.py`; tracing never affects a score.
 """
 
 import asyncio
@@ -26,6 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..dogfood import trace_judge
 from ..providers import NO_KEY_ERROR, build_chat_model, default_provider
 from . import GradeContext, GradeResult
 
@@ -103,37 +103,47 @@ def _unpack(reply: Any) -> tuple[Any, int | None, int | None]:
     return reply, None, None
 
 
-async def _judge(prompt: str, config: dict, context: GradeContext) -> GradeResult:
-    """One judged call with retry. Raises RuntimeError for unrecoverable states."""
+async def _judge(grader: str, prompt: str, config: dict, context: GradeContext) -> GradeResult:
+    """One judged call with retry. Raises RuntimeError for unrecoverable states.
+
+    `grader` names the trace when judge tracing is on (dogfood.py); it has no
+    effect on scoring.
+    """
     model = _build_model(config, context.model_factory)
+    model_name = config.get("model") or (default_provider() or (None, None))[1]
 
-    last_exc: Exception | None = None
-    for attempt in range(MAX_ATTEMPTS):
-        try:
-            verdict = await model.ainvoke(prompt)
-            break
-        except Exception as exc:
-            last_exc = exc
-            if not _is_retryable(exc) or attempt == MAX_ATTEMPTS - 1:
-                raise
-            # Jittered, capped exponential backoff (checklist row 10).
-            delay = min(BASE_BACKOFF_S * (2**attempt), MAX_BACKOFF_S)
-            await asyncio.sleep(delay * (0.5 + random.random() / 2))
-    else:  # pragma: no cover - loop always breaks or raises
-        raise last_exc or RuntimeError("judge failed")
+    # The whole call including retries is one trace: a judge that succeeded on
+    # its third attempt is exactly the thing worth being able to see.
+    with trace_judge(grader, model_name, prompt) as recorder:
+        last_exc: Exception | None = None
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                verdict = await model.ainvoke(prompt)
+                break
+            except Exception as exc:
+                last_exc = exc
+                if not _is_retryable(exc) or attempt == MAX_ATTEMPTS - 1:
+                    raise
+                # Jittered, capped exponential backoff (checklist row 10).
+                delay = min(BASE_BACKOFF_S * (2**attempt), MAX_BACKOFF_S)
+                await asyncio.sleep(delay * (0.5 + random.random() / 2))
+        else:  # pragma: no cover - loop always breaks or raises
+            raise last_exc or RuntimeError("judge failed")
 
-    verdict, tokens_in, tokens_out = _unpack(verdict)
+        verdict, tokens_in, tokens_out = _unpack(verdict)
 
-    # Structured output may arrive as a Verdict or a plain dict depending on
-    # the LangChain version and whether a fake model was injected.
-    if isinstance(verdict, Verdict):
-        score, reasoning = verdict.score, verdict.reasoning
-    elif isinstance(verdict, dict):
-        score = float(verdict.get("score", 0.0))
-        reasoning = str(verdict.get("reasoning", ""))
-    else:
-        score = float(getattr(verdict, "score", 0.0))
-        reasoning = str(getattr(verdict, "reasoning", ""))
+        # Structured output may arrive as a Verdict or a plain dict depending on
+        # the LangChain version and whether a fake model was injected.
+        if isinstance(verdict, Verdict):
+            score, reasoning = verdict.score, verdict.reasoning
+        elif isinstance(verdict, dict):
+            score = float(verdict.get("score", 0.0))
+            reasoning = str(verdict.get("reasoning", ""))
+        else:
+            score = float(getattr(verdict, "score", 0.0))
+            reasoning = str(getattr(verdict, "reasoning", ""))
+
+        recorder.record(score, reasoning, tokens_in, tokens_out)
 
     threshold = float(config.get("threshold", 0.7))
     return GradeResult(
@@ -142,7 +152,7 @@ async def _judge(prompt: str, config: dict, context: GradeContext) -> GradeResul
         reasoning=reasoning,
         tokens_in=tokens_in,
         tokens_out=tokens_out,
-        model=config.get("model") or (default_provider() or (None, None))[1],
+        model=model_name,
     )
 
 
@@ -162,7 +172,7 @@ class AccuracyJudge:
             "0.0 if it contradicts it or misses the point, and a value in between "
             "for partial matches. Wording may differ; judge meaning, not phrasing."
         )
-        return await _judge(prompt, config, context)
+        return await _judge(self.name, prompt, config, context)
 
 
 class HallucinationJudge:
@@ -182,7 +192,7 @@ class HallucinationJudge:
             "value in between when only some claims are grounded. Do not penalize "
             "the answer for omitting context."
         )
-        return await _judge(prompt, config, context)
+        return await _judge(self.name, prompt, config, context)
 
 
 class ToneJudge:
@@ -199,7 +209,7 @@ class ToneJudge:
             "clearly does not, and a value in between for a partial match. Judge "
             "tone only — not factual accuracy."
         )
-        return await _judge(prompt, config, context)
+        return await _judge(self.name, prompt, config, context)
 
 
 class CustomJudge:
@@ -218,7 +228,7 @@ class CustomJudge:
             "Score 1.0 if the output fully satisfies the rubric, 0.0 if it fails "
             "it entirely, and a value in between for partial satisfaction."
         )
-        return await _judge(prompt, config, context)
+        return await _judge(self.name, prompt, config, context)
 
 
 BUILTINS = (AccuracyJudge(), HallucinationJudge(), ToneJudge(), CustomJudge())

@@ -16,6 +16,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.2", "pytest-asyncio>=1.0", "ruff>=0.4"]
+# LLM judge providers (ADR-0016). Optional because the test suite runs keyless
+# with faked models; only a deployment running judged evals needs these, and
+# then only the one for its provider. Imported lazily in providers.py, so a
+# missing package is a per-item grader error, not an import failure.
+judges = [
+    "langchain-anthropic>=0.3",
+    "langchain-google-genai>=2.0",
+    "python-dotenv>=1.0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
