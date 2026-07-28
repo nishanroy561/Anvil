@@ -1,9 +1,16 @@
-"""LLM provider resolution for judges and target generation (ADR-0016).
+"""LLM provider resolution for judges and target generation (ADR-0016, ADR-0020).
 
 The model name picks the provider — `claude-*` → Anthropic, `gemini-*` →
 Google. That keeps provider choice in data (grader/target config, already
 round-tripped through the API and UI) rather than in configuration, so adding a
 provider never touches the eval runner or the dashboard.
+
+Groq breaks the "family name implies provider" assumption, because Groq is an
+inference host rather than a model family: it serves `llama-3.3-70b-versatile`
+and `openai/gpt-oss-120b`, names that say nothing about who is serving them and
+in the second case actively mislead. So Groq models are addressed with an
+explicit `groq/` routing prefix — `groq/llama-3.3-70b-versatile` — which the
+first segment of is stripped before the call (ADR-0020).
 
 Two behaviours are deliberate:
 
@@ -29,7 +36,10 @@ NO_KEY_ERROR = "no judge key configured"
 PROVIDERS = [
     ("ANTHROPIC_API_KEY", ("claude",), "claude-sonnet-5"),
     ("GOOGLE_API_KEY", ("gemini",), "gemini-2.5-flash"),
+    ("GROQ_API_KEY", ("groq/",), "groq/llama-3.3-70b-versatile"),
 ]
+
+GROQ_PREFIX = "groq/"
 
 _env_loaded = False
 
@@ -106,6 +116,18 @@ def build_chat_model(model: str | None, **kwargs):
         # No temperature: current Claude models reject non-default sampling
         # parameters, and the judge wants determinism anyway.
         return ChatAnthropic(model=model_name, max_tokens=kwargs.get("max_tokens", 1024))
+
+    if env_var == "GROQ_API_KEY":
+        try:
+            from langchain_groq import ChatGroq
+        except ImportError as exc:
+            raise RuntimeError(f"langchain-groq not installed: {exc}") from exc
+        # Only the first segment is the routing prefix; the rest is Groq's own
+        # model id, which may itself contain a slash (`openai/gpt-oss-120b`).
+        return ChatGroq(
+            model=model_name[len(GROQ_PREFIX) :],
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
 
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI

@@ -1,0 +1,51 @@
+# Anvil eval config — the contract between your repo and the CI gate.
+#
+#   anvil eval run --config eval.yaml --wait --min-score accuracy=0.8
+#
+# Real YAML needs PyYAML (`pip install 'anvil-sdk[cli]'`). Without it the CLI
+# still reads this file as JSON, so a JSON-shaped .yaml works dependency-free.
+
+# The dataset to score. Copy the id from the dataset page in the dashboard.
+# --dataset on the command line overrides this.
+dataset: 00000000-0000-0000-0000-000000000000
+
+# Optional. Defaults to ci-<timestamp>; the workflow below sets a better one
+# from the PR number so runs are identifiable in the dashboard.
+name: ci
+
+target:
+  # "generate" runs the prompt against a model and grades what comes back —
+  # what you want in CI, because the prompt is the thing under test.
+  # "rescore" grades outputs already stored on the dataset items and ignores
+  # model and prompt entirely.
+  mode: generate
+
+  # The model name picks the provider (ADR-0016). Inference hosts take an
+  # explicit routing prefix (ADR-0020):
+  #   claude-sonnet-5                 -> ANTHROPIC_API_KEY
+  #   gemini-2.5-flash                -> GOOGLE_API_KEY
+  #   groq/llama-3.3-70b-versatile    -> GROQ_API_KEY
+  # The key lives on the Anvil worker, not in CI — CI only holds ANVIL_API_KEY.
+  model: groq/llama-3.3-70b-versatile
+
+  # Keep the prompt in the repo so the diff that triggers this gate is the same
+  # diff being evaluated. Use `prompt:` for an inline string instead — not both.
+  prompt_file: prompts/answer.txt
+
+  max_tokens: 512
+
+# Every grader named here must exist and its config must match the schema at
+# GET /v1/graders — an invalid config is rejected when the run is created
+# rather than quietly scoring 1.0 on everything.
+graders:
+  - name: valid_json
+  - name: citation_present
+  - name: not_contains
+    config:
+      value: "I'm sorry"
+  - name: accuracy
+    config:
+      threshold: 0.7
+      # Judges cost money per item. Name the model explicitly or the first key
+      # present on the worker wins, which is rarely what you meant.
+      model: groq/llama-3.3-70b-versatile

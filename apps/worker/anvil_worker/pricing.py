@@ -22,6 +22,19 @@ PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
     # OpenAI (placeholders — verify)
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
+    # Groq — verified 2026-07-28 against groq.com/pricing. Keyed on the full
+    # `groq/` name (ADR-0020) because the provider, not the model family, sets
+    # the price: `openai/gpt-oss-120b` on Groq costs nothing like it would from
+    # OpenAI, and both could appear in one deployment.
+    "groq/llama-3.3-70b-versatile": (0.59, 0.79),
+    "groq/llama-3.1-8b-instant": (0.05, 0.08),
+    "groq/openai/gpt-oss-120b": (0.15, 0.60),
+    "groq/openai/gpt-oss-20b": (0.075, 0.30),
+    "groq/qwen/qwen3.6-27b": (0.60, 3.00),
+    # `groq/compound` is deliberately absent: Groq passes its cost through to
+    # whichever underlying models the system picks, so there is no per-token
+    # price to state. Unknown model -> None -> cost null, which is the honest
+    # answer rather than a made-up one.
 }
 
 
