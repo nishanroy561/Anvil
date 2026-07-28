@@ -2,8 +2,8 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { cancelEvalRun, getEvalResults, getEvalRun } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { cancelEvalRun, getEvalResults, getEvalRun, listEvalRuns } from "@/lib/api";
 import { formatCost, formatDuration } from "@/lib/format";
 import type { EvalResult, EvalRun } from "@/lib/types";
 import { JsonView } from "@/components/JsonView";
@@ -215,6 +215,85 @@ function ResultRow({ result, graderNames }: { result: EvalResult; graderNames: s
   );
 }
 
+/**
+ * "Compare against…" — only offers runs over the same dataset, because a
+ * comparison pairs on item ids and runs over different datasets share none.
+ * Loads the candidate list lazily: most visits to this page never open it.
+ */
+function CompareAgainst({ projectId, run }: { projectId: string; run: EvalRun }) {
+  const [open, setOpen] = useState(false);
+  const [candidates, setCandidates] = useState<EvalRun[] | null>(null);
+  const wrapper = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || candidates) return;
+    listEvalRuns(projectId, run.dataset_id)
+      .then((rs) => setCandidates(rs.filter((r) => r.id !== run.id)))
+      .catch(() => setCandidates([]));
+  }, [open, candidates, projectId, run.dataset_id, run.id]);
+
+  // Escape and click-outside: a popover whose only exit is the button that
+  // opened it traps anyone who opened it by accident.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onClick = (e: MouseEvent) => {
+      if (!wrapper.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onClick);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onClick);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapper} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="btn-ghost"
+      >
+        Compare against…
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Runs over the same dataset"
+          className="absolute right-0 z-20 mt-1 max-h-72 w-72 overflow-y-auto rounded-lg border border-line bg-iron-950 p-1 shadow-lg"
+        >
+          {candidates === null ? (
+            <div className="flex justify-center p-3">
+              <Spinner />
+            </div>
+          ) : candidates.length === 0 ? (
+            <p className="p-3 text-2xs leading-relaxed text-ink-muted">
+              No other run has scored this dataset yet. A comparison needs two.
+            </p>
+          ) : (
+            candidates.map((c) => (
+              <Link
+                key={c.id}
+                role="menuitem"
+                // This run is the baseline, the one picked is the change.
+                href={`/p/${projectId}/evals/compare?a=${run.id}&b=${c.id}`}
+                className="block truncate rounded px-2 py-1.5 text-2xs text-ink transition-colors duration-150 hover:bg-iron-850"
+              >
+                {c.name}
+              </Link>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function EvalRunPage({
   params,
 }: {
@@ -284,6 +363,7 @@ export default function EvalRunPage({
               : "re-score"}
           </span>
           <div className="ml-auto flex items-center gap-2">
+            <CompareAgainst projectId={projectId} run={run} />
             <Link href={`/p/${projectId}/datasets/${run.dataset_id}`} className="btn-ghost">
               Dataset
             </Link>

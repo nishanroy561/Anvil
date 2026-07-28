@@ -532,6 +532,32 @@ API-death scenarios.
   the deterministic `contains` grader, since the statistics don't care where
   scores come from.
 
+**Phase 6 UI (same session, after go-ahead) — built and checked in Chrome:**
+
+- `/p/[id]/evals/compare?a=&b=` — verdict banner (one plain-language sentence
+  per grader), per-grader table (mean A/B, delta, 95% CI, p, n, verdict chip,
+  and a `status-warn` note where any pairs were tautological), latency and cost
+  cards, and a per-item diff showing only rows whose score changed, both
+  outputs side by side with judge reasoning.
+- **The banner never leads with a percentage when the verdict is
+  inconclusive** — that is ADR-0008's requirement, not a style preference.
+  Verified on screen: the n=5 comparison reads "contains: not enough data to
+  call it — 5 items compared, and it takes at least 30 before a difference this
+  size can be told apart from chance", while the n=40 one reads
+  "n40-B-answering lowered contains 100% → 0% … significant, CI -1.00 to -1.00".
+  The delta is still in the table either way; only the headline changes.
+- A "compared on n of m items" line always shows, plus an explicit warning when
+  `partial` — the dataset changed between the runs.
+- Entry points: checkbox column + selection bar on the run list (capped at two;
+  a third selection drops the oldest, and the Compare button stays disabled with
+  an explanation when the two runs scored different datasets), and a
+  "Compare against…" popover on the run detail page listing only runs over the
+  same dataset. The popover closes on Escape and on outside click.
+- Route note: `/evals/compare` and `/evals/[runId]` coexist because Next.js
+  prefers the static segment. This is the opposite of the API, where FastAPI
+  matches in declaration order and `compare` had to be declared first.
+- `npx tsc --noEmit` clean; `npm run build` clean.
+
 ## What exists
 
 - Root: compose (postgres/redis/api/worker/web + `observability` profile:

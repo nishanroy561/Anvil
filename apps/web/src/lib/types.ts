@@ -167,6 +167,51 @@ export interface EvalResult {
   error: string | null;
 }
 
+/** Why a grader declined to call a result. `null` when it did call one. */
+export type InconclusiveReason =
+  | "no_paired_scores"
+  | "tautological"
+  | "insufficient_data"
+  | "ci_contains_zero";
+
+export interface GraderComparison {
+  grader: string;
+  n: number;
+  mean_a: number | null;
+  mean_b: number | null;
+  delta: number | null;
+  ci: [number, number] | null;
+  p_value: number | null;
+  significant: boolean;
+  verdict: "improved" | "regressed" | "inconclusive";
+  reason: InconclusiveReason | null;
+  tautological_pairs: number;
+}
+
+export interface RunComparison {
+  run_a: { id: string; name: string | null; total_items: number };
+  run_b: { id: string; name: string | null; total_items: number };
+  compared_items: number;
+  /** The snapshots differed, so this compared fewer items than one run scored. */
+  partial: boolean;
+  graders: GraderComparison[];
+  latency: {
+    a: number | null;
+    b: number | null;
+    delta: number | null;
+    p95_a: number | null;
+    p95_b: number | null;
+    p95_delta: number | null;
+  };
+  cost: {
+    a: number;
+    b: number;
+    delta: number | null;
+    mean_a: number | null;
+    mean_b: number | null;
+  };
+}
+
 export interface GraderInfo {
   name: string;
   kind: "deterministic" | "judge";

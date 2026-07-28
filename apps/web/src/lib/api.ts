@@ -13,6 +13,7 @@ import type {
   GraderInfo,
   MetricsOverview,
   Project,
+  RunComparison,
   TraceDetail,
   TraceListPage,
   UserOut,
@@ -196,6 +197,9 @@ export const createEvalRun = (body: {
 
 export const cancelEvalRun = (runId: string) =>
   request<EvalRun>(`/v1/eval-runs/${runId}/cancel`, { method: "POST" });
+
+export const compareEvalRuns = (a: string, b: string) =>
+  request<RunComparison>(`/v1/eval-runs/compare?a=${a}&b=${b}`);
 
 export const metricsOverview = (projectId: string, opts: { since?: string; interval?: "hour" | "day" } = {}) => {
   const params = new URLSearchParams();
