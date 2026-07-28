@@ -111,6 +111,7 @@ class LengthBounds:
 
 class ExactMatch:
     name = "exact_match"
+    compares_expected = True
 
     async def grade(self, output: Any, context: GradeContext, config: dict) -> GradeResult:
         if context.expected_output is None:

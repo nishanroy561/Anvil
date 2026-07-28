@@ -36,7 +36,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from .config import get_settings
 from .db import transaction
-from .graders import GradeContext, load_graders, run_grader
+from .graders import GradeContext, compares_expected, load_graders, run_grader
 from .metrics import EVAL_ITEMS, EVAL_RUNS
 from .providers import build_chat_model
 from .registry import resolve_price
@@ -125,11 +125,18 @@ async def _run_item(run: dict, item: dict, model_factory: Any) -> dict:
     target = run["target_config"] or {}
     graders = (run["grader_config"] or {}).get("graders", [])
 
-    output: Any = item["expected_output"]
+    item_meta = item.get("metadata") or {}
+    # Rescore grades what the app actually produced, which promotion keeps in
+    # `recorded_output` — *not* `expected_output`, which is the reference it is
+    # scored against and which a human may have edited (ADR-0018). Items
+    # promoted before that key existed fall back to the old behaviour; the
+    # tautology check below is what stops those scoring silently wrong.
+    output: Any = item_meta.get("recorded_output", item["expected_output"])
     tokens_in = tokens_out = None
     error: str | None = None
+    generating = target.get("mode", "generate") == "generate"
 
-    if target.get("mode", "generate") == "generate":
+    if generating:
         try:
             output, tokens_in, tokens_out = await _generate(target, item, model_factory)
         except Exception as exc:
@@ -141,7 +148,14 @@ async def _run_item(run: dict, item: dict, model_factory: Any) -> dict:
     judge_cost = 0.0
 
     if error is None:
-        meta = item.get("metadata") or {}
+        meta = item_meta
+        # Rescore only: the graded output came out of the item itself, so if it
+        # equals the reference, any grader comparing the two is comparing a
+        # value with itself and returns a perfect score however bad the output
+        # is. Detected by value rather than by flag, so items promoted before
+        # ADR-0018 are caught too. A *generated* output that matches the
+        # reference is a genuine match and must never be flagged.
+        self_referential = not generating and _as_text(output) == _as_text(item["expected_output"])
         context = GradeContext(
             input=item["input"],
             expected_output=item["expected_output"],
@@ -157,6 +171,10 @@ async def _run_item(run: dict, item: dict, model_factory: Any) -> dict:
                 scores[name] = {"error": grader_error}
                 continue
             scores[name] = {"score": result.score, "detail": result.detail}
+            if self_referential and compares_expected(name):
+                # Recorded on the score itself so every consumer — summary, UI,
+                # Phase 6 comparison — sees it without re-deriving the rule.
+                scores[name]["tautological"] = True
             if result.reasoning:
                 reasoning[name] = result.reasoning
             # Judging is billable work; a run that hides it under-reports spend.
@@ -201,12 +219,17 @@ def summarize(rows: list[dict], graders: list[dict]) -> dict:
     The aggregation rule lives here: an item whose grader errored is excluded
     from that grader's mean and counted in `errored_items`, so degraded
     coverage is visible rather than disguised as a low score.
+
+    Tautological scores (ADR-0018) are counted but *not* excluded — unlike a
+    grader error they are real scores, they are simply uninformative. Dropping
+    them would silently shrink the run; counting them lets the reader discount
+    the mean themselves.
     """
     per_grader: dict[str, Any] = {}
     for spec in graders:
         name = spec.get("name", "")
         threshold = float((spec.get("config") or {}).get("threshold", 0.5))
-        values, errored = [], 0
+        values, errored, tautological = [], 0, 0
         for row in rows:
             entry = (row.get("scores") or {}).get(name)
             if entry is None:
@@ -214,12 +237,15 @@ def summarize(rows: list[dict], graders: list[dict]) -> dict:
             if "error" in entry:
                 errored += 1
                 continue
+            if entry.get("tautological"):
+                tautological += 1
             values.append(float(entry.get("score", 0.0)))
         per_grader[name] = {
             "mean": (sum(values) / len(values)) if values else None,
             "pass_rate": (sum(1 for v in values if v >= threshold) / len(values)) if values else None,
             "scored_items": len(values),
             "errored_items": errored,
+            "tautological_items": tautological,
         }
 
     latencies = sorted(r["latency_ms"] for r in rows if r.get("latency_ms") is not None)

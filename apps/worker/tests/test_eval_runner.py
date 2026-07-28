@@ -41,7 +41,12 @@ class FakeModel:
         return Reply()
 
 
-async def _make_dataset(project_id: uuid.UUID, n: int = 10) -> tuple[uuid.UUID, list[uuid.UUID]]:
+async def _make_dataset(
+    project_id: uuid.UUID,
+    n: int = 10,
+    expected_output: str = "an answer",
+    metadata: dict | None = None,
+) -> tuple[uuid.UUID, list[uuid.UUID]]:
     dataset_id = uuid.uuid4()
     item_ids = [uuid.uuid4() for _ in range(n)]
     async with engine.begin() as conn:
@@ -57,8 +62,8 @@ async def _make_dataset(project_id: uuid.UUID, n: int = 10) -> tuple[uuid.UUID, 
                         "id": item_id,
                         "dataset_id": dataset_id,
                         "input": {"question": f"q{i}"},
-                        "expected_output": "an answer",
-                        "metadata": None,
+                        "expected_output": expected_output,
+                        "metadata": metadata,
                         "source_trace_id": None,
                     }
                     for i, item_id in enumerate(item_ids)
@@ -330,3 +335,111 @@ def test_summary_of_an_all_errored_grader_is_null_not_zero():
     summary = summarize(rows, [{"name": "j", "config": {}}])
     assert summary["graders"]["j"]["mean"] is None
     assert summary["graders"]["j"]["errored_items"] == 1
+
+
+# ---- rescore grades the recorded output, not the reference (ADR-0018) -------
+
+
+RESCORE = {"mode": "rescore"}
+
+
+async def test_rescore_grades_the_recorded_output_not_the_expected_output(
+    project_factory, redis_client
+):
+    """The bug this pins: rescore used to grade `expected_output` itself, so
+    `exact_match` compared a value with itself and every item scored 1.0
+    however wrong the application's real output was."""
+    project_id = await project_factory()
+    dataset_id, _ = await _make_dataset(
+        project_id,
+        n=1,
+        expected_output="the right answer",
+        metadata={"recorded_output": "a completely different answer"},
+    )
+    run_id = await _make_run(project_id, dataset_id, target=RESCORE)
+
+    await EvalRunner(redis_client).execute(run_id)
+
+    (row,) = await _results(run_id)
+    assert row["scores"]["exact_match"]["score"] == 0.0, (
+        "graded the reference against itself instead of the recorded output"
+    )
+    # Scalars are wrapped so the JSONB column always holds an object.
+    assert row["output"] == {"value": "a completely different answer"}
+
+
+async def test_rescore_scores_a_genuine_match(project_factory, redis_client):
+    """The other half — the fix must not make matching outputs fail."""
+    project_id = await project_factory()
+    dataset_id, _ = await _make_dataset(
+        project_id, n=1, expected_output="same", metadata={"recorded_output": "same"}
+    )
+    run_id = await _make_run(project_id, dataset_id, target=RESCORE)
+
+    await EvalRunner(redis_client).execute(run_id)
+
+    (row,) = await _results(run_id)
+    assert row["scores"]["exact_match"]["score"] == 1.0
+
+
+async def test_self_referential_scores_are_flagged_tautological(project_factory, redis_client):
+    """Items promoted before ADR-0018 have no `recorded_output` and fall back to
+    the old behaviour. The score is still 1.0 — it must not be presented as if
+    it meant something."""
+    project_id = await project_factory()
+    dataset_id, _ = await _make_dataset(project_id, n=1, metadata=None)
+    run_id = await _make_run(project_id, dataset_id, target=RESCORE)
+
+    await EvalRunner(redis_client).execute(run_id)
+
+    (row,) = await _results(run_id)
+    entry = row["scores"]["exact_match"]
+    assert entry["score"] == 1.0
+    assert entry["tautological"] is True
+
+
+async def test_graders_that_ignore_the_reference_are_never_flagged(project_factory, redis_client):
+    """`length_bounds` judges the output on its own terms, so a self-referential
+    item is still a perfectly meaningful score for it. Flagging it would cry
+    wolf on the seven graders that were never affected."""
+    project_id = await project_factory()
+    dataset_id, _ = await _make_dataset(project_id, n=1, metadata=None)
+    run_id = await _make_run(
+        project_id,
+        dataset_id,
+        graders=[{"name": "length_bounds", "config": {"min": 1}}],
+        target=RESCORE,
+    )
+
+    await EvalRunner(redis_client).execute(run_id)
+
+    (row,) = await _results(run_id)
+    assert "tautological" not in row["scores"]["length_bounds"]
+
+
+async def test_generate_mode_is_never_flagged_tautological(project_factory, redis_client):
+    """A generated output that happens to equal the reference is a real 1.0 —
+    the flag is about rescore's self-comparison, not about matching."""
+    project_id = await project_factory()
+    dataset_id, _ = await _make_dataset(project_id, n=1, expected_output="an answer")
+    run_id = await _make_run(project_id, dataset_id)
+
+    await EvalRunner(redis_client, model_factory=lambda _m: FakeModel("an answer")).execute(run_id)
+
+    (row,) = await _results(run_id)
+    assert row["scores"]["exact_match"]["score"] == 1.0
+    assert "tautological" not in row["scores"]["exact_match"]
+
+
+def test_summary_counts_tautological_scores_without_excluding_them():
+    """Unlike a grader error, a tautological score is real but uninformative:
+    excluding it would silently shrink the run."""
+    rows = [
+        {"scores": {"acc": {"score": 1.0, "tautological": True}}, "latency_ms": 1, "cost_usd": None, "error": None},
+        {"scores": {"acc": {"score": 0.5}}, "latency_ms": 1, "cost_usd": None, "error": None},
+    ]
+    summary = summarize(rows, [{"name": "acc", "config": {}}])
+    acc = summary["graders"]["acc"]
+    assert acc["scored_items"] == 2
+    assert acc["tautological_items"] == 1
+    assert acc["mean"] == pytest.approx(0.75)

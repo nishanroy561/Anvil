@@ -67,6 +67,12 @@ class Grader(Protocol):
     # "deterministic" (the default) or "judge". Only affects the timeout budget
     # a grader gets; plugins that omit it are treated as deterministic.
     kind: str
+    # True when the grader scores the output *against* `context.expected_output`
+    # rather than judging it on its own terms. Such a grader is meaningless when
+    # the two are the same value, which is exactly what a rescore run over
+    # unedited promoted items produces — see ADR-0018. Plugins that omit it are
+    # treated as not comparing, so an unaware plugin is never falsely flagged.
+    compares_expected: bool
 
     async def grade(self, output: Any, context: GradeContext, config: dict) -> GradeResult: ...
 
@@ -118,6 +124,16 @@ def registered_names() -> list[str]:
     if not _graders:
         load_graders()
     return sorted(_graders)
+
+
+def compares_expected(name: str) -> bool:
+    """Whether `name` scores against the reference answer (ADR-0018).
+
+    Defaults to False for unknown or unaware graders: a missed flag costs a
+    warning nobody sees, while a false one would cry wolf on honest scores.
+    """
+    grader = get_grader(name)
+    return bool(getattr(grader, "compares_expected", False))
 
 
 def catalog() -> list[dict]:

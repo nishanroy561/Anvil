@@ -156,6 +156,60 @@ async def test_promote_copies_trace_payloads_into_items(tenant):
     assert items[0]["source_trace_id"] == trace_id
     # Provenance is copied, so it survives retention deleting the trace.
     assert items[0]["metadata"]["promoted_from_trace"] == trace_id
+    # The recorded output is kept apart from the reference it will be graded
+    # against, or rescore grades a value with itself (ADR-0018).
+    assert items[0]["metadata"]["recorded_output"] == "because"
+    assert items[0]["metadata"]["expected_output_edited"] is False
+
+
+async def test_promotion_metadata_cannot_be_shadowed_by_the_customers_own(tenant):
+    """A trace whose own metadata carries `recorded_output` must not be able to
+    displace the real one — Anvil's keys are written last."""
+    trace_id = await insert_trace(tenant.project_id)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE traces SET metadata = CAST(:m AS jsonb) WHERE id = CAST(:id AS uuid)"
+            ),
+            {"m": '{"recorded_output": "spoofed", "promoted_from_trace": "nonsense"}', "id": trace_id},
+        )
+
+    dataset = await make_dataset(tenant)
+    await tenant.client.post(f"/v1/datasets/{dataset['id']}/promote", json={"trace_ids": [trace_id]})
+
+    meta = (await tenant.client.get(f"/v1/datasets/{dataset['id']}/items")).json()["items"][0][
+        "metadata"
+    ]
+    assert meta["recorded_output"] == "because"
+    assert meta["promoted_from_trace"] == trace_id
+
+
+async def test_editing_the_expected_output_marks_it_edited(tenant):
+    """A rescore run reads this to tell a real reference from a copy of the
+    output it is about to grade (ADR-0018)."""
+    dataset = await make_dataset(tenant)
+    trace_id = await insert_trace(tenant.project_id)
+    await tenant.client.post(f"/v1/datasets/{dataset['id']}/promote", json={"trace_ids": [trace_id]})
+    item = (await tenant.client.get(f"/v1/datasets/{dataset['id']}/items")).json()["items"][0]
+    assert item["metadata"]["expected_output_edited"] is False
+
+    res = await tenant.client.patch(
+        f"/v1/dataset-items/{item['id']}", json={"expected_output": "a better answer"}
+    )
+    assert res.status_code == 200
+    assert res.json()["metadata"]["expected_output_edited"] is True
+    # The recorded output is untouched by editing the reference.
+    assert res.json()["metadata"]["recorded_output"] == "because"
+
+
+async def test_editing_input_alone_does_not_mark_the_expected_output_edited(tenant):
+    dataset = await make_dataset(tenant)
+    trace_id = await insert_trace(tenant.project_id)
+    await tenant.client.post(f"/v1/datasets/{dataset['id']}/promote", json={"trace_ids": [trace_id]})
+    item = (await tenant.client.get(f"/v1/datasets/{dataset['id']}/items")).json()["items"][0]
+
+    res = await tenant.client.patch(f"/v1/dataset-items/{item['id']}", json={"input": {"q": "new"}})
+    assert res.json()["metadata"]["expected_output_edited"] is False
 
 
 async def test_promoting_the_same_trace_twice_is_a_noop(tenant):

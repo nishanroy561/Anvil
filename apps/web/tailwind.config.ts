@@ -38,6 +38,10 @@ const config: Config = {
           error: "#D92D20",
           running: "#1570EF",
           abandoned: "#72727F",
+          // "This number is not what it looks like" — distinct from error,
+          // which means something broke. Amber-700 from the same family as the
+          // others; 5.9:1 on the page surface.
+          warn: "#B54708",
         },
         span: {
           llm: "#7C3AED",

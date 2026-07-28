@@ -36,6 +36,18 @@ function SummaryCards({ run }: { run: EvalRun }) {
               <span className="text-status-error"> · {g.errored_items} errored</span>
             )}
           </p>
+          {(g.tautological_items ?? 0) > 0 && (
+            // A mean built mostly from self-comparisons is not a measurement.
+            // Saying so next to the number is the whole point.
+            <p
+              className="mt-1.5 font-mono text-2xs leading-snug text-status-warn"
+              title="These items were graded against their own output, so the grader could only return a perfect score. Edit the expected outputs, or run in generate mode, to measure anything."
+            >
+              {g.tautological_items === g.scored_items
+                ? "measures nothing — graded against itself"
+                : `${g.tautological_items} of ${g.scored_items} graded against itself`}
+            </p>
+          )}
         </div>
       ))}
       <div className="rounded-lg border border-line bg-iron-900 p-3">
@@ -64,8 +76,17 @@ function ResultRow({ result, graderNames }: { result: EvalResult; graderNames: s
   const graderErrors = Object.entries(result.scores ?? {}).flatMap(([name, entry]) =>
     entry?.error ? [[name, entry.error] as const] : [],
   );
+  // Scores that could only ever have come back perfect (ADR-0018). Surfaced on
+  // the row as well as the summary, so a reader scanning the table sees which
+  // individual 1.00s to discount.
+  const tautological = Object.entries(result.scores ?? {}).flatMap(([name, entry]) =>
+    entry?.tautological ? [name] : [],
+  );
   const hasDetail =
-    Object.keys(reasoning).length > 0 || result.error !== null || graderErrors.length > 0;
+    Object.keys(reasoning).length > 0 ||
+    result.error !== null ||
+    graderErrors.length > 0 ||
+    tautological.length > 0;
   const toggle = () => setOpen((v) => !v);
 
   return (
@@ -109,6 +130,15 @@ function ResultRow({ result, graderNames }: { result: EvalResult; graderNames: s
                 <span className="text-status-error" title={entry.error}>
                   err
                 </span>
+              ) : entry.tautological ? (
+                <span
+                  className="text-status-warn"
+                  title="Graded against its own output — this score could only have been perfect"
+                >
+                  {(entry.score ?? 0).toFixed(2)}
+                  <span aria-hidden> *</span>
+                  <span className="sr-only"> (graded against itself)</span>
+                </span>
               ) : (
                 <span className={scoreTone(entry.score ?? 0)}>{(entry.score ?? 0).toFixed(2)}</span>
               )}
@@ -148,6 +178,20 @@ function ResultRow({ result, graderNames }: { result: EvalResult; graderNames: s
                 </pre>
               </div>
             ))}
+            {tautological.length > 0 && (
+              <div className="mb-3">
+                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-status-warn">
+                  {tautological.join(", ")} — graded against itself
+                </h4>
+                <p className="text-2xs leading-relaxed text-ink-muted">
+                  This item&apos;s expected output is the same value as the output being
+                  graded, so these graders could only return a perfect score. Edit the
+                  expected output on the dataset to say what the answer{" "}
+                  <em>should</em> be, or run the eval in generate mode against a target
+                  model.
+                </p>
+              </div>
+            )}
             {Object.entries(reasoning).map(([grader, text]) => (
               <div key={grader} className="mb-3 last:mb-0">
                 <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-ink-faint">

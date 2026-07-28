@@ -159,6 +159,7 @@ async def _judge(grader: str, prompt: str, config: dict, context: GradeContext) 
 class AccuracyJudge:
     name = "accuracy"
     kind = "judge"
+    compares_expected = True
 
     async def grade(self, output: Any, context: GradeContext, config: dict) -> GradeResult:
         if context.expected_output is None:

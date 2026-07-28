@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addDatasetItems,
   deleteDatasetItem,
@@ -46,23 +46,62 @@ function EditableCell({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [clipped, setClipped] = useState(false);
+  const preRef = useRef<HTMLPreElement>(null);
+  const text = asEditorText(value);
+
+  // A promoted output is routinely taller than the clamp, and JSON cut
+  // mid-object with no affordance reads as corrupt rather than truncated.
+  useEffect(() => {
+    const el = preRef.current;
+    if (!el || expanded) return;
+    setClipped(el.scrollHeight > el.clientHeight + 1);
+  }, [text, expanded, editing]);
 
   if (!editing) {
     return (
-      <button
-        type="button"
-        onClick={() => {
-          setDraft(asEditorText(value));
-          setEditing(true);
-        }}
-        aria-label={`Edit ${label}`}
-        title="Click to edit"
-        className="block w-full cursor-pointer rounded px-1 py-0.5 text-left transition-colors duration-150 hover:bg-iron-800"
-      >
-        <pre className="max-h-24 overflow-hidden whitespace-pre-wrap break-words font-mono text-2xs leading-relaxed text-ink">
-          {asEditorText(value) || <span className="text-ink-faint">empty</span>}
-        </pre>
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(text);
+            setEditing(true);
+          }}
+          aria-label={`Edit ${label}`}
+          title="Click to edit"
+          className="block w-full cursor-pointer rounded px-1 py-0.5 text-left transition-colors duration-150 hover:bg-iron-800"
+        >
+          <pre
+            ref={preRef}
+            className={`whitespace-pre-wrap break-words font-mono text-2xs leading-relaxed text-ink ${
+              expanded ? "" : "max-h-24 overflow-hidden"
+            }`}
+          >
+            {text || <span className="text-ink-faint">empty</span>}
+          </pre>
+        </button>
+        {(clipped || expanded) && (
+          <>
+            {!expanded && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 bottom-4 h-6 bg-gradient-to-b from-transparent to-iron-950"
+              />
+            )}
+            {/* Sibling rather than nested — a button inside the edit button
+                would be invalid markup and unreachable by keyboard. */}
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              className="relative cursor-pointer px-1 font-mono text-2xs text-ink-faint transition-colors duration-150 hover:text-ink"
+            >
+              {expanded ? "show less" : "show more"}
+            </button>
+          </>
+        )}
+      </div>
     );
   }
 

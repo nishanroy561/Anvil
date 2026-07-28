@@ -235,10 +235,15 @@ async def update_item(
     fields = body.model_dump(exclude_unset=True)
     if "input" in fields:
         item.input = fields["input"]
-    if "expected_output" in fields:
-        item.expected_output = fields["expected_output"]
     if "metadata" in fields:
         item.meta = fields["metadata"]
+    if "expected_output" in fields:
+        item.expected_output = fields["expected_output"]
+        # Applied after `metadata` so an explicit metadata write can't undo it,
+        # and reassigned rather than mutated so SQLAlchemy sees the JSONB change.
+        # This is what tells a rescore run the reference is now a real reference
+        # and not just a copy of the output (ADR-0018).
+        item.meta = {**(item.meta or {}), "expected_output_edited": True}
     await session.commit()
     await session.refresh(item)
     return DatasetItemOut(
@@ -309,9 +314,18 @@ async def promote_traces(
                 input=trace.input,
                 expected_output=trace.output,
                 meta={
+                    # Customer metadata first: Anvil's own keys must win, or a
+                    # trace carrying `recorded_output` in its metadata could
+                    # shadow the real one.
+                    **(trace.meta or {}),
                     "promoted_from_trace": str(trace.id),
                     "trace_name": trace.name,
-                    **(trace.meta or {}),
+                    # What the app actually produced, kept apart from the
+                    # reference it will be graded against (ADR-0018). Both start
+                    # equal; editing `expected_output` is what makes the pair
+                    # meaningful, and `expected_output_edited` records that.
+                    "recorded_output": trace.output,
+                    "expected_output_edited": False,
                 },
                 source_trace_id=trace.id,
             )

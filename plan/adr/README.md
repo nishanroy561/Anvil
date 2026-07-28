@@ -25,6 +25,7 @@ Every load-bearing decision gets an ADR: short, immutable once accepted, superse
 | [0015](0015-sdks-emit-traces-at-completion.md) | SDKs emit a trace once, at completion; no client-side `in_progress` | Accepted |
 | [0016](0016-model-name-picks-the-provider.md) | The configured model name resolves the LLM provider (Anthropic / Google) | Accepted |
 | [0017](0017-judge-calls-traced-into-an-internal-project.md) | Judge calls are traced into a designated internal project, opt-in via `ANVIL_INTERNAL_API_KEY` | Accepted |
+| [0018](0018-recorded-output-is-kept-apart-from-expected-output.md) | The recorded output is kept in `metadata.recorded_output`, apart from the reference `expected_output` | Accepted |
 
 ## Template
 

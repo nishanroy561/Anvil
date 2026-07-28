@@ -118,6 +118,13 @@ export interface GraderSummary {
   pass_rate: number | null;
   scored_items: number;
   errored_items: number;
+  /**
+   * Scores where the graded output *was* the reference it was compared against,
+   * so a perfect score means nothing (ADR-0018). Counted, not excluded — the
+   * score is real, just uninformative. Optional: runs recorded before ADR-0018
+   * have no such field.
+   */
+  tautological_items?: number;
 }
 
 export interface EvalRunSummary {
@@ -150,7 +157,10 @@ export interface EvalResult {
   run_id: string;
   item_id: string;
   output: unknown;
-  scores: Record<string, { score?: number; detail?: Record<string, unknown>; error?: string }> | null;
+  scores: Record<
+    string,
+    { score?: number; detail?: Record<string, unknown>; error?: string; tautological?: boolean }
+  > | null;
   judge_reasoning: Record<string, string> | null;
   latency_ms: number | null;
   cost_usd: number | null;
