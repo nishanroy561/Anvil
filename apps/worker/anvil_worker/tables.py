@@ -7,8 +7,10 @@ round-trip test is what catches it if you forget.
 """
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Integer,
     MetaData,
@@ -196,4 +198,20 @@ projects = Table(
     Column("slug", String(256)),
     Column("alert_webhook_url", Text),
     Column("created_at", DateTime(timezone=True)),
+)
+
+# ---- Phase 10: retention & usage rollups -------------------------------------
+
+org_usage = Table(
+    "org_usage",
+    metadata,
+    Column("org_id", Uuid, primary_key=True),
+    # First day of the month it summarises.
+    Column("month", Date, primary_key=True),
+    Column("traces_ingested", BigInteger, nullable=False),
+    Column("eval_items", BigInteger, nullable=False),
+    # Deliberately never written — see ADR-0022. Per-org bytes cannot be
+    # attributed honestly, and a guess wearing a byte count is worse than null.
+    Column("storage_bytes", BigInteger),
+    Column("updated_at", DateTime(timezone=True)),
 )

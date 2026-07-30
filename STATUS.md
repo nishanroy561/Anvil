@@ -4,7 +4,70 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-30 (Phase 9 complete — backend, acceptance and UI)
+Last updated: 2026-07-30 (Phase 10 backend + acceptance; usage panel UI not built)
+
+## Phase 10 — retention & housekeeping (2026-07-30). BACKEND DONE, acceptance passes.
+
+- **`retention.py`** is one daily loop with two jobs. **Retention deletes traces
+  older than `RETENTION_DAYS`; unset is the default and means keep everything** —
+  the window is `None`, never inferred, so an operator who has not asked for
+  deletion cannot get it by starting a worker. A window below 1 is *refused
+  rather than interpreted*: 0 would mean "delete traffic still arriving", and the
+  failure mode of guessing is total data loss. Deletes go 5k per transaction with
+  a sleep between (checklist row 23) — `DELETE … LIMIT` is not valid Postgres, so
+  each batch selects ids oldest-first and deletes by id, which also keeps every
+  statement's row count bounded.
+- **The sweep is global**, not per-org: ADR-0019 left no per-org plan windows, so
+  the pre-ADR-0019 line in the spec about "the org it is sweeping" no longer
+  applies. There is a test pinning this, because it is surprising.
+- **Datasets outlive their traces** (checklist row 24) — `source_trace_id` is
+  `ON DELETE SET NULL` and promoted items carry their own copy of the input, the
+  reference output and the recorded output (ADR-0018). Spans, feedback and
+  monitor scores cascade away with the trace.
+- **[ADR-0022](plan/adr/0022-usage-rollups-are-monotonic.md) — the two halves of
+  this phase fight each other, and the fight is the interesting part.** §2 says
+  usage rollups are "recomputed from Postgres" and therefore "always correct".
+  That holds only until §1 deletes something: the first sweep that expires June
+  makes the next recompute count June as **zero** and overwrite the 400k traces
+  actually ingested. The operator's busiest month is then reported as their
+  quietest, and each feature looks correct in isolation — which is how it
+  survives review. Fixed by making the counters **monotonic** (`GREATEST`):
+  `traces_ingested` is a fact about the past and cannot fall, so a smaller
+  recompute is evidence of deletion, not a correction. `storage_bytes` stays
+  **null** — per-org bytes are not honestly attributable, and a share-of-rows
+  estimate is a guess wearing a byte count.
+- Eval items are counted from `eval_results`, not `eval_runs.total`: a cancelled
+  run promised more than it graded, and the panel is about what was spent.
+- `GET /v1/usage` (session auth, org-scoped from the session — no path param, so
+  no route exists by which one org could ask for another's). Carries **no quota,
+  no percentage-of-limit and no plan field**; there is a test asserting the exact
+  key set, because a `limit` on this response is the seed of a quota bar and
+  Anvil has no tiers. The API reports `retention_days` but never acts on it — a
+  count means something different under a 30-day policy than under keep-forever.
+- **Acceptance: `python scripts/retention_acceptance.py --force` → PASSED**, 24
+  checks. Unset window deletes nothing; a 0-day window is refused; a 1-day window
+  expires 14 traces in batches of 4 (`[4, 4, 4, 2, 0]`, none over the cap) while
+  fresh traffic survives; a dataset promoted **before** the sweep keeps all six
+  items with `source_trace_id` null, its payloads intact, and **still runs an
+  eval to completion, scoring 1.0 from its own copy of the data**; and a
+  post-sweep recompute does not revise the month down.
+- **The acceptance requires `--force`, and that is not ceremony.** The window is
+  global, so a 1-day sweep expires *everything* on the box older than a day. The
+  first (unguarded) run took out 51 traces of dev data along with its own,
+  including the demo project's. The script now counts what it would destroy,
+  prints it, and exits 2 without the flag. The demo project has been reseeded to
+  26 traces; **its 24 datasets and 387 items were never at risk**, which is the
+  phase's guarantee demonstrated on real data rather than in a fixture.
+- **Test counts: API 186 (+10), worker 197 (+19).** All green.
+
+### Phase 10 UI — specified, not built (needs a go-ahead)
+
+`GET /v1/usage` is live and tested. Outstanding: a **Settings → Usage** panel —
+traces ingested and eval items graded per month, the configured retention window
+stated in plain language (or "traces are kept forever"), and no quota bar, no
+percentage, no CTA (plan/retention.md §2, ADR-0019).
+
+
 
 ## Phase 9 UI — built and verified in Chrome (2026-07-30)
 
@@ -384,7 +447,9 @@ See "Phase 5 gaps" #1.** User gave the Phase 5 UI go-ahead.
 **Phase 8 (monitors & alerts): DONE** — acceptance passes.
 **Phase 9 (feedback loop): DONE** — acceptance passes, UI built and checked in
 Chrome.
-Phases 10–11: not started (stubs with spec pointers exist).
+**Phase 10 (retention & housekeeping): BACKEND DONE** — acceptance passes. The
+usage panel awaits a go-ahead (see the Phase 10 section at the top).
+Phase 11: not started.
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -873,7 +938,8 @@ API-death scenarios.
   (pricing resolver registry with the cloud-mode built-ins-only rule),
   `config.py`, `db.py`, `metrics.py` (:9101). `eval_runner`, `sampler`,
   `feedback_consumer.py` (Phase 9 — deferred-retry sorted set, upsert, tenant
-  guard at persist); only `retention` remains a spec-docstring stub.
+  guard at persist), and `retention.py` (Phase 10 — batched sweep + monotonic
+  usage rollups). No stubs remain in the worker.
   `pricing.py` is **partly verified**: Anthropic entries were checked against the
   published list on 2026-07-21 and Google's were added under ADR-0016, but the
   two OpenAI entries are still marked `# placeholders — verify` in the file.
@@ -904,10 +970,9 @@ API-death scenarios.
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
    trace for jank. Worth a look at `/evals/compare` while there.
-2. **Phase 10 — retention** (plan/retention.md): the batched retention worker
-   (opt-in via `RETENTION_DAYS`) plus a usage-rollups panel with no quota bar.
-   `anvil_worker/retention.py` is still a spec-docstring stub.
-3. Then 11 (hardening) per plan.md's phase table.
+2. **Phase 10 usage panel** — the worker, `GET /v1/usage` and the acceptance are
+   done; **Settings → Usage** is not. Needs a go-ahead.
+3. Then 11 (hardening) per plan.md's phase table — the last phase.
 
 **Backfill worth doing at some point:** items promoted before ADR-0018 have no
 `metadata.recorded_output`, so their reference-comparing scores come back

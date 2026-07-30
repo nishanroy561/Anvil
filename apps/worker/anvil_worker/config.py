@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     # grow until Redis is the outage.
     feedback_deferred_max: int = 50_000
 
+    # Retention (Phase 10, plan/retention.md §1). **Unset means keep everything**
+    # — an operator who has not asked for deletion never gets deletion, so this
+    # is `None` rather than a number, and no default window is inferred.
+    retention_days: int | None = None
+    # Traces deleted per transaction. Never one giant DELETE: that bloats WAL and
+    # holds locks for the length of the sweep (checklist row 23).
+    retention_batch_size: int = 5_000
+    retention_batch_sleep_s: float = 0.5
+    retention_interval_s: int = 24 * 3600
+
     metrics_port: int = 9101
 
 

@@ -20,6 +20,7 @@ from .routers import (
     monitors,
     projects,
     traces,
+    usage,
 )
 from .streams import DLQ_STREAM, TRACES_STREAM
 
@@ -85,3 +86,4 @@ app.include_router(datasets.router)
 app.include_router(eval_runs.router)
 app.include_router(monitors.router)
 app.include_router(feedback.router)
+app.include_router(usage.router)

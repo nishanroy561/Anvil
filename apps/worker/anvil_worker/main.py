@@ -1,8 +1,7 @@
 """Worker entrypoint: every background loop runs as a concurrent task here —
 ingest consumer, stale-trace reaper, feedback consumer, eval runner, monitor
-sampler and alerter (plan/ingestion.md §3, plan/evaluation.md §3/§6/§7).
-
-Phase 10 adds retention alongside these.
+sampler, alerter, and the daily retention/usage pass (plan/ingestion.md §3,
+plan/evaluation.md §3/§6/§7, plan/retention.md).
 """
 
 import asyncio
@@ -22,6 +21,7 @@ from .graders import load_graders
 from .ingest_consumer import IngestConsumer, run_reaper
 from .providers import load_env
 from .registry import load_pricing_resolvers
+from .retention import Retention
 from .sampler import Sampler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -43,6 +43,7 @@ async def main() -> None:
     evals = EvalRunner(client)
     sampler = Sampler()
     alerter = Alerter()
+    retention = Retention()
 
     tasks = [
         asyncio.create_task(consumer.run()),
@@ -51,6 +52,7 @@ async def main() -> None:
         asyncio.create_task(evals.run()),
         asyncio.create_task(sampler.run()),
         asyncio.create_task(alerter.run()),
+        asyncio.create_task(retention.run()),
     ]
 
     def _request_stop() -> None:
@@ -62,6 +64,7 @@ async def main() -> None:
         evals.stop()
         sampler.stop()
         alerter.stop()
+        retention.stop()
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

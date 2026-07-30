@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     feedback_stream_maxlen: int = 100_000
     failure_inbox_page_size_max: int = 200
 
+    # Retention (Phase 10). The **worker** owns deletion; the API only reports the
+    # window, because "12,000 traces" means something different under a 30-day
+    # policy than under keep-forever. Unset = keep everything.
+    retention_days: int | None = None
+
     admin_api_key: str = ""
 
 

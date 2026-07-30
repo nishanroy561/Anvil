@@ -38,6 +38,18 @@ ABANDONED_TRACES = Counter(
 EVAL_ITEMS = Counter("anvil_eval_items_total", "Dataset items scored")
 EVAL_RUNS = Counter("anvil_eval_runs_total", "Eval runs reaching a terminal state", ["status"])
 
+# ---- Phase 10: retention & usage rollups -------------------------------------
+
+RETENTION_DELETED = Counter(
+    "anvil_retention_traces_deleted_total", "Traces removed by the retention sweep"
+)
+RETENTION_SWEEP_SECONDS = Histogram(
+    "anvil_retention_sweep_seconds", "Wall time of one retention sweep"
+)
+USAGE_ROLLUPS = Counter(
+    "anvil_usage_rollups_total", "Org-month rows upserted into org_usage"
+)
+
 # ---- Phase 9: feedback loop --------------------------------------------------
 
 FEEDBACK_PERSISTED = Counter(
