@@ -61,7 +61,7 @@ async def test_valid_key_resolves_its_project_and_revoked_key_is_rejected(client
 
     revoked = await client.get("/_test/whoami", headers=auth)
     assert revoked.status_code == 401
-    assert revoked.json()["detail"]["code"] == "invalid_api_key"
+    assert revoked.json()["error"]["code"] == "invalid_api_key"
 
 
 async def test_missing_and_malformed_api_keys_are_rejected(client):
@@ -93,7 +93,7 @@ async def test_other_tenants_resources_404_never_403(client, client_for_ip):
             await other.delete(f"/v1/api-keys/{acme_key_id}"),
         ]:
             assert res.status_code == 404, res.request.url
-            assert res.json()["detail"]["code"] == "not_found"
+            assert res.json()["error"]["code"] == "not_found"
 
     # Acme's key still works — nothing was revoked by the cross-tenant attempt.
     whoami = await client.get(

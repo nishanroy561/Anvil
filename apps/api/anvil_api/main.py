@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from redis.exceptions import RedisError
 
+from . import errors
 from .config import get_settings
 from .metrics import DLQ_DEPTH, STREAM_DEPTH
 from .redis_client import get_redis
@@ -26,6 +27,8 @@ from .streams import DLQ_STREAM, TRACES_STREAM
 
 logging.basicConfig(
     level=logging.INFO,
+    # The request id is threaded through error responses and log lines alike, so
+    # a report of "it failed" can be joined to the server's own record of it.
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 log = logging.getLogger(__name__)
@@ -65,6 +68,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Anvil API", version="0.1.0", lifespan=lifespan)
+
+# One error envelope and one request id for everything below (Phase 11 §2).
+errors.install(app)
 
 app.add_middleware(
     CORSMiddleware,

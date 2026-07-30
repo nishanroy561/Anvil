@@ -196,7 +196,7 @@ async def test_feedback_is_rate_limited_per_key(client, tenant, monkeypatch):
     assert codes == [202, 202, 202, 429, 429]
 
     limited = await client.post("/v1/feedback", json=body, headers=tenant.headers)
-    assert limited.json()["detail"]["code"] == "rate_limited"
+    assert limited.json()["error"]["code"] == "rate_limited"
     assert limited.headers["Retry-After"]
 
 

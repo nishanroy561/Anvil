@@ -1,7 +1,11 @@
 /**
  * Typed API client. All calls go through the Next.js `/api` rewrite so the
- * session cookie is same-origin (see next.config.mjs). The API's error shape
- * is `{"detail": {"code", "message"}}` — surfaced here as ApiError.
+ * session cookie is same-origin (see next.config.mjs).
+ *
+ * Errors are `{"error": {"code", "message"}}` on every failure the API can
+ * produce (Phase 11 §2) — surfaced here as ApiError. The legacy `detail` shape is
+ * still read as a fallback, so a dashboard built from this file keeps working
+ * against an older API during a rolling deploy.
  */
 
 import type {
@@ -53,7 +57,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let message = `Request failed (${res.status})`;
     try {
       const body = await res.json();
-      const detail = body?.detail ?? body?.error;
+      // `error` first: it is the current shape, and a server that sends both
+      // must not be read as the deprecated one.
+      const detail = body?.error ?? body?.detail;
       if (typeof detail === "object" && detail !== null) {
         code = detail.code ?? code;
         message = detail.message ?? message;

@@ -170,7 +170,7 @@ async def test_malformed_cursor_is_rejected(tenant):
         f"/v1/projects/{tenant.project_id}/traces?cursor=not-a-real-cursor"
     )
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "invalid_cursor"
+    assert res.json()["error"]["code"] == "invalid_cursor"
 
 
 async def test_page_size_is_capped(tenant):
@@ -204,7 +204,7 @@ async def test_search_below_the_trigram_floor_is_rejected(tenant):
     rather than silently seq-scanning."""
     res = await tenant.client.get(f"/v1/projects/{tenant.project_id}/traces?q=ab")
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "query_too_short"
+    assert res.json()["error"]["code"] == "query_too_short"
 
 
 async def test_search_is_bounded_to_the_retention_window(tenant):

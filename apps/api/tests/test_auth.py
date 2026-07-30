@@ -33,7 +33,7 @@ async def test_signup_rejects_duplicate_email_without_confirming_it_exists(clien
     assert res.status_code == 400
     # No user enumeration: the message must not distinguish "taken" from any
     # other validation failure.
-    assert res.json()["detail"]["code"] == "signup_failed"
+    assert res.json()["error"]["code"] == "signup_failed"
     assert "dup@example.com" not in res.text
 
 
@@ -67,7 +67,7 @@ async def test_unauthenticated_and_tampered_sessions_are_rejected(client):
     client.cookies.set(SESSION_COOKIE, "not-a-signed-token")
     res = await client.get("/v1/projects")
     assert res.status_code == 401
-    assert res.json()["detail"]["code"] == "unauthenticated"
+    assert res.json()["error"]["code"] == "unauthenticated"
 
 
 async def test_logout_clears_the_session(client):

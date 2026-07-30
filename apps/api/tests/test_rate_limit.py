@@ -37,7 +37,7 @@ async def test_per_ip_limit_blocks_the_11th_attempt_and_spares_other_ips(client_
 
         blocked = await _login(attacker, f"victim{limit}@example.com")
         assert blocked.status_code == 429
-        assert blocked.json()["detail"]["code"] == "rate_limited"
+        assert blocked.json()["error"]["code"] == "rate_limited"
         assert int(blocked.headers["Retry-After"]) > 0
 
     # A different IP is unaffected: the limit is per-IP, not global.

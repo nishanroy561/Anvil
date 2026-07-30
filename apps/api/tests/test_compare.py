@@ -215,7 +215,7 @@ async def test_comparing_runs_over_different_datasets_is_refused(tenant):
 
     res = await tenant.client.get(f"/v1/eval-runs/compare?a={a}&b={b}")
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "datasets_differ"
+    assert res.json()["error"]["code"] == "datasets_differ"
 
 
 async def test_compare_is_not_swallowed_by_the_run_detail_route(tenant):

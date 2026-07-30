@@ -100,9 +100,10 @@ async def test_malformed_batch_is_rejected_with_a_usable_error(client, tenant):
     res = await client.post("/v1/ingest/traces", json=batch, headers=tenant.headers)
 
     assert res.status_code == 422
-    detail = res.json()["detail"]
+    detail = res.json()["error"]
     assert detail["code"] == "invalid_payload"
-    # The path is what lets an SDK author find the field without guessing.
+    # The path is what lets an SDK author find the field without guessing. The
+    # envelope carries a router's extra keys through rather than flattening them.
     assert "spans" in detail["errors"][0]["path"]
     assert detail["errors"][0]["trace_index"] == 0
     assert await get_redis().xlen(TRACES_STREAM) == 0
@@ -135,7 +136,7 @@ async def test_body_over_the_size_cap_is_413(client, tenant, monkeypatch):
         headers=tenant.headers,
     )
     assert res.status_code == 413
-    assert res.json()["detail"]["code"] == "payload_too_large"
+    assert res.json()["error"]["code"] == "payload_too_large"
 
 
 async def test_oversized_field_is_truncated_rather_than_rejected(
@@ -163,7 +164,7 @@ async def test_invalid_json_is_400(client, tenant):
         headers={**tenant.headers, "content-type": "application/json"},
     )
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "invalid_json"
+    assert res.json()["error"]["code"] == "invalid_json"
 
 
 async def test_ingest_requires_a_live_api_key(client, tenant):
@@ -187,7 +188,7 @@ async def test_backpressure_returns_429_when_the_buffer_is_saturated(
     res = await client.post("/v1/ingest/traces", json=make_batch(), headers=tenant.headers)
 
     assert res.status_code == 429
-    assert res.json()["detail"]["code"] == "backpressure"
+    assert res.json()["error"]["code"] == "backpressure"
     assert res.headers["Retry-After"]
 
 
@@ -225,7 +226,7 @@ async def test_trace_count_limit_bills_per_trace_not_per_request(
 
     second = await client.post("/v1/ingest/traces", json=make_batch(), headers=tenant.headers)
     assert second.status_code == 429
-    assert second.json()["detail"]["code"] == "rate_limited"
+    assert second.json()["error"]["code"] == "rate_limited"
 
 
 async def test_stats_reports_accepts_rejects_and_depth(client, tenant):

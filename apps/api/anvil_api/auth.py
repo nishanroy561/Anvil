@@ -62,7 +62,37 @@ async def current_user(
     user = await session.get(User, uuid.UUID(user_id))
     if user is None:
         raise HTTPException(401, detail={"code": "unauthenticated", "message": "Unknown user"})
+
+    # Per-session backstop on dashboard reads (Phase 11 §2). Every other surface
+    # already has a limiter of its own; this one covers the dozens of session
+    # routes that had none — a runaway poll or a page stuck in a refresh loop is
+    # a self-inflicted denial of service that no per-key limit would catch. The
+    # ceiling is deliberately far above human use: at 240/min a person clicking
+    # around never sees it, and the 10 s auto-refresh on two open tabs doesn't
+    # either. Fails open like every other limiter (ADR-0007).
+    await enforce_session_read_limit(request, str(user.id))
     return user
+
+
+async def enforce_session_read_limit(request: Request, user_id: str) -> None:
+    """Counts reads only. Writes are individually cheap and already guarded, and
+    metering them here would make a limiter the reason a form submission failed.
+    """
+    if request.method not in ("GET", "HEAD"):
+        return
+
+    settings = get_settings()
+    if settings.session_read_limit_pm <= 0:  # 0 disables it outright
+        return
+
+    # Imported here rather than at module scope: `services.rate_limit` imports
+    # from `metrics`, and auth is imported by nearly everything.
+    from .redis_client import get_redis
+    from .services.rate_limit import enforce_rate_limit
+
+    await enforce_rate_limit(
+        get_redis(), "session:reads", user_id, settings.session_read_limit_pm
+    )
 
 
 # ── API keys ────────────────────────────────────────────────────────────

@@ -260,7 +260,7 @@ async def test_empty_dataset_is_rejected(tenant):
     dataset = await make_dataset(tenant)
     res = await tenant.client.post("/v1/eval-runs", json=run_body(dataset["id"]))
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "empty_dataset"
+    assert res.json()["error"]["code"] == "empty_dataset"
 
 
 async def test_generate_mode_requires_a_target_model(tenant):
@@ -269,7 +269,7 @@ async def test_generate_mode_requires_a_target_model(tenant):
         "/v1/eval-runs", json=run_body(dataset["id"], target={"mode": "generate"})
     )
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "target_model_required"
+    assert res.json()["error"]["code"] == "target_model_required"
 
 
 async def test_dataset_over_max_eval_items_is_refused(tenant, monkeypatch):
@@ -281,7 +281,7 @@ async def test_dataset_over_max_eval_items_is_refused(tenant, monkeypatch):
 
     res = await tenant.client.post("/v1/eval-runs", json=run_body(dataset["id"]))
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "dataset_too_large"
+    assert res.json()["error"]["code"] == "dataset_too_large"
 
 
 async def test_too_many_concurrent_runs_is_429(tenant, monkeypatch):
@@ -294,7 +294,7 @@ async def test_too_many_concurrent_runs_is_429(tenant, monkeypatch):
     assert (await tenant.client.post("/v1/eval-runs", json=run_body(dataset["id"]))).status_code == 201
     second = await tenant.client.post("/v1/eval-runs", json=run_body(dataset["id"]))
     assert second.status_code == 429
-    assert second.json()["detail"]["code"] == "too_many_runs"
+    assert second.json()["error"]["code"] == "too_many_runs"
 
 
 async def test_cancel_moves_a_queued_run_to_cancelled(tenant):
@@ -337,7 +337,7 @@ async def test_deleting_a_dataset_with_runs_is_refused(tenant):
 
     res = await tenant.client.delete(f"/v1/datasets/{dataset['id']}")
     assert res.status_code == 409
-    assert res.json()["detail"]["code"] == "dataset_in_use"
+    assert res.json()["error"]["code"] == "dataset_in_use"
 
 
 # ---- grader catalog ---------------------------------------------------------
@@ -372,7 +372,7 @@ async def test_invalid_grader_config_is_refused_at_creation(tenant):
         json=run_body(dataset["id"], graders=[{"name": "contains", "config": {}}]),
     )
     assert res.status_code == 400, res.text
-    assert res.json()["detail"]["code"] == "invalid_grader_config"
+    assert res.json()["error"]["code"] == "invalid_grader_config"
 
 
 async def test_a_misspelled_config_key_is_refused(tenant):
@@ -387,7 +387,7 @@ async def test_a_misspelled_config_key_is_refused(tenant):
         ),
     )
     assert res.status_code == 400
-    assert "contains" in res.json()["detail"]["message"]
+    assert "contains" in res.json()["error"]["message"]
 
 
 async def test_a_valid_grader_config_is_accepted(tenant):

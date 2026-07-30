@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     # Rate limits (fixed-window; ADR-0007). All per-minute.
     auth_ip_limit_pm: int = 10
     auth_email_limit_pm: int = 5
+    # Backstop on dashboard reads, per session (Phase 11 §2). Far above human
+    # use — a page stuck in a refresh loop is what this catches, not a person.
+    # 0 disables it.
+    session_read_limit_pm: int = 240
 
     # Ingestion (Phase 2)
     ingest_high_water: int = 80_000

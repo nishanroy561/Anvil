@@ -153,12 +153,22 @@ class Api:
 
     def _check(self, res: Any) -> Any:
         if res.status_code >= 400:
+            # `{"error": {"code", "message"}}` is the current shape; `detail` is
+            # read too so the CLI keeps working against an older API, which
+            # matters here more than anywhere else — CI pins SDK versions and
+            # upgrades the server on its own schedule.
             try:
-                detail = res.json().get("detail") or res.json()
+                body = res.json()
+                detail = body.get("error") or body.get("detail") or body
                 message = detail.get("message") if isinstance(detail, dict) else str(detail)
             except Exception:  # noqa: BLE001
                 message = res.text[:300]
-            raise CliError(f"{res.request.method} {res.request.url.path} -> {res.status_code}: {message}")
+            request_id = res.headers.get("x-request-id")
+            suffix = f" (request {request_id})" if request_id else ""
+            raise CliError(
+                f"{res.request.method} {res.request.url.path} -> "
+                f"{res.status_code}: {message}{suffix}"
+            )
         return res.json()
 
     def create_run(self, body: dict) -> dict:

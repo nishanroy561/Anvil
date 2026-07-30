@@ -113,7 +113,7 @@ async def test_a_revoked_key_is_refused(tenant):
     async with keyed_client(tenant.key) as ci:
         res = await ci.post("/v1/eval-runs", json={**RUN_BODY, "dataset_id": dataset["id"]})
         assert res.status_code == 401
-        assert res.json()["detail"]["code"] == "invalid_api_key"
+        assert res.json()["error"]["code"] == "invalid_api_key"
 
 
 async def test_no_credential_at_all_is_a_401(tenant):

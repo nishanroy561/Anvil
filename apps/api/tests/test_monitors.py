@@ -131,7 +131,7 @@ async def test_an_invalid_cron_is_refused(tenant):
         json=monitor_body(schedule_cron="every ten minutes please"),
     )
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "invalid_cron"
+    assert res.json()["error"]["code"] == "invalid_cron"
 
 
 async def test_an_invalid_grader_config_is_refused(tenant):
@@ -142,7 +142,7 @@ async def test_an_invalid_grader_config_is_refused(tenant):
         json=monitor_body(graders=[{"name": "contains", "config": {}}]),
     )
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "invalid_grader_config"
+    assert res.json()["error"]["code"] == "invalid_grader_config"
 
 
 async def test_sample_rate_is_bounded(tenant):
@@ -295,7 +295,7 @@ async def test_a_non_http_webhook_is_refused(tenant):
         json={"alert_webhook_url": "hooks.example/anvil"},
     )
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "invalid_webhook_url"
+    assert res.json()["error"]["code"] == "invalid_webhook_url"
 
 
 # ---- tenancy ----------------------------------------------------------------
