@@ -1,0 +1,65 @@
+# Production overlay (plan.md Phase 11 §1).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --wait
+#
+# An overlay rather than a compose *profile*, because profiles only add and remove
+# services — they cannot change the settings of one. Everything below is a change
+# to a service the base file already defines.
+#
+# What it changes, and why each one matters in production but not on a laptop:
+#
+# 1. **Two workers.** The consumer-group design has always claimed a second
+#    replica is safe — same group, disjoint messages, reclaim on death. Running it
+#    is what proves it, and one worker is a single point of failure for ingestion.
+# 2. **The database and queue stop being published at all.** In dev those ports are
+#    how you run psql and the test suite. The base file already binds them to
+#    127.0.0.1 rather than 0.0.0.0, so they were never network-reachable; here they
+#    go away entirely, because a production host has no reason to reach them and
+#    `docker exec` still can.
+# 3. **SECRET_KEY becomes mandatory.** The base file defaults it so `compose up`
+#    works on a clean clone. Shipping that default is a forged-session-cookie
+#    vulnerability, so here compose refuses to start without one.
+# 4. **restart: always.** `unless-stopped` does not come back after a host reboot.
+
+services:
+  postgres:
+    # `!reset`, not `[]`. Overlays merge sequences by *appending*, so `ports: []`
+    # appends nothing and the base mapping survives untouched — which it did, for
+    # one iteration of this file, while the comment above it claimed otherwise.
+    # `!reset` is the Compose-spec tag for actually clearing an inherited value.
+    ports: !reset []
+    restart: always
+
+  redis:
+    ports: !reset []
+    restart: always
+
+  api:
+    environment:
+      # `:?` fails the whole command with this message when unset, rather than
+      # quietly starting with a signing key that is public knowledge.
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env — sessions are signed with it}
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  worker:
+    # The claim the consumer-group design has been making since Phase 2, actually
+    # exercised: two replicas in one group, each message delivered to one of them,
+    # and a survivor reclaiming the other's pending entries when it dies. The
+    # Phase-2 load test kills a worker mid-run to prove exactly this.
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 2g
+    restart: always
+
+  web:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512m

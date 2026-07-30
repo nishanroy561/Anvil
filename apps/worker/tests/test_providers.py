@@ -167,3 +167,15 @@ def test_groq_compound_has_no_price_rather_than_a_guessed_one():
     from anvil_worker.pricing import resolve
 
     assert resolve("groq/groq/compound") is None
+
+
+def test_a_blank_retention_days_reads_as_unset(monkeypatch):
+    """Mirrors the API-side check — compose passes an empty string for the
+    documented "keep everything" default, and the worker parses the same var."""
+    from anvil_worker.config import Settings
+
+    monkeypatch.setenv("RETENTION_DAYS", "")
+    assert Settings(_env_file=None).retention_days is None
+
+    monkeypatch.setenv("RETENTION_DAYS", "45")
+    assert Settings(_env_file=None).retention_days == 45

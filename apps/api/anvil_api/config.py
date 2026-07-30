@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,6 +55,25 @@ class Settings(BaseSettings):
     retention_days: int | None = None
 
     admin_api_key: str = ""
+
+    @field_validator("retention_days", mode="before")
+    @classmethod
+    def _blank_means_unset(cls, value):
+        """`RETENTION_DAYS=` is unset, not a parse error.
+
+        Found by `docker compose up` on a clean volume: compose renders
+        `${RETENTION_DAYS:-}` as an empty string and passes it in, and pydantic
+        refused to read `""` as `int | None` — so the API crash-looped at import
+        on the *default* configuration. `.env.example` ships the same blank value,
+        so anyone starting the API from the repo root hit it too.
+
+        An optional integer whose documented default is "unset" has to treat an
+        empty value as unset; anything else makes the documented default a
+        landmine.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 @lru_cache

@@ -4,6 +4,7 @@ package (ADR-0014)."""
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -66,6 +67,15 @@ class Settings(BaseSettings):
     retention_interval_s: int = 24 * 3600
 
     metrics_port: int = 9101
+
+    @field_validator("retention_days", mode="before")
+    @classmethod
+    def _blank_means_unset(cls, value):
+        """`RETENTION_DAYS=` is unset, not a parse error — see the identical
+        validator in `anvil_api.config`, and the compose boot that found it."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 @lru_cache

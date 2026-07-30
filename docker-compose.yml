@@ -1,5 +1,11 @@
 name: anvil
 
+# `docker compose up -d --wait` brings up the whole product: database, queue,
+# migrations, API, worker, dashboard. That is the only install path there is
+# (ADR-0019 — no hosted tier), so it has to work on a fresh clone with no manual
+# steps. `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`
+# adds the production hardening; see that file.
+
 services:
   postgres:
     image: postgres:16
@@ -8,7 +14,12 @@ services:
       POSTGRES_PASSWORD: anvil
       POSTGRES_DB: anvil
     ports:
-      - "5432:5432"
+      # Loopback only. The host needs this to run psql and the test suite, but
+      # `5432:5432` binds 0.0.0.0 — an open Postgres with the password `anvil` on
+      # every interface the machine has, which on any shared network is the whole
+      # database. Nothing inside compose uses this mapping; services reach each
+      # other by service name over the compose network.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -16,6 +27,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7
@@ -23,7 +35,9 @@ services:
     # restart or ingestion's zero-loss guarantee is void (ADR-0002).
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      # Loopback only — same reasoning as postgres above. Redis has no password
+      # at all, so this one matters more.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -31,6 +45,26 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  # One-shot schema migration, and the reason `compose up` works on a clean
+  # volume at all — nothing else ran Alembic, so a fresh clone previously came up
+  # with an API and no tables.
+  #
+  # A separate service rather than an API entrypoint step, for two reasons: it
+  # runs exactly once however many API replicas start (concurrent `alembic
+  # upgrade` on one database is a race nobody wants to debug), and a failed
+  # migration is then visible as a failed container instead of a crash-looping
+  # API.
+  migrate:
+    build: apps/api
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://anvil:anvil@postgres:5432/anvil
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   api:
     build: apps/api
@@ -40,6 +74,9 @@ services:
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
       DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-self_hosted}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      # Reported to the usage panel, never acted on by the API — the worker owns
+      # deletion (ADR-0022). Unset means keep everything.
+      RETENTION_DAYS: ${RETENTION_DAYS:-}
     ports:
       - "8000:8000"
     depends_on:
@@ -47,6 +84,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
   worker:
     build: apps/worker
@@ -54,20 +94,35 @@ services:
       DATABASE_URL: postgresql+asyncpg://anvil:anvil@postgres:5432/anvil
       REDIS_URL: redis://redis:6379/0
       DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-self_hosted}
+      RETENTION_DAYS: ${RETENTION_DAYS:-}
+      # Judge providers. Only needed for LLM-backed graders, and the image needs
+      # building with WORKER_EXTRAS=[judges] for them to be importable.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    # No published port: with replicas a fixed host port collides, and Prometheus
+    # reaches 9101 over the compose network by DNS anyway.
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
   web:
     build: apps/web
     environment:
-      WEB_API_BASE_URL: ${WEB_API_BASE_URL:-http://localhost:8000}
+      # Where the *web server* reaches the API, not the browser — the browser goes
+      # through the /api rewrite so the session cookie stays first-party.
+      WEB_API_BASE_URL: ${WEB_API_BASE_URL:-http://api:8000}
     ports:
       - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ── Self-observability (plan/observability.md) ── docker compose --profile observability up
   prometheus:
@@ -78,6 +133,7 @@ services:
       - ./infra/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
     ports:
       - "9090:9090"
+    restart: unless-stopped
 
   grafana:
     image: grafana/grafana:11.1.0
@@ -91,6 +147,7 @@ services:
       - grafanadata:/var/lib/grafana
     ports:
       - "3001:3000"   # 3000 is taken by web
+    restart: unless-stopped
 
   tempo:
     image: grafana/tempo:2.5.0
@@ -99,6 +156,7 @@ services:
     volumes:
       - ./infra/observability/tempo.yml:/etc/tempo.yml:ro
       - tempodata:/var/tempo
+    restart: unless-stopped
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.104.0
@@ -109,6 +167,7 @@ services:
     ports:
       - "4317:4317"
       - "4318:4318"
+    restart: unless-stopped
 
 volumes:
   pgdata:

@@ -11,14 +11,20 @@ scrape_configs:
     static_configs:
       - targets: ["api:8000"]
 
-  # Worker metric servers (plan/observability.md §1). Targets come alive as
-  # the corresponding phases are built; Prometheus tolerates them being down.
-  - job_name: anvil-worker-ingest
-    static_configs:
-      - targets: ["worker:9101"]
-  - job_name: anvil-worker-eval
-    static_configs:
-      - targets: ["worker:9102"]
-  - job_name: anvil-worker-schedulers
-    static_configs:
-      - targets: ["worker:9103"]
+  # One worker job, discovered by DNS rather than pinned to an address.
+  #
+  # Two corrections. This used to list three static targets (9101/9102/9103) from
+  # an earlier design where each loop had its own metrics server; the worker
+  # actually serves everything on `metrics_port`, so two of the three were
+  # permanently-down targets making the Prometheus UI look broken.
+  #
+  # And `static_configs: ["worker:9101"]` resolves the name once and keeps a single
+  # address, so under `deploy.replicas: 2` it would scrape one replica and silently
+  # ignore the other — metrics from half the fleet simply absent. A DNS A-record
+  # lookup returns every container behind the compose service name, so both are
+  # found and each carries its own `instance` label.
+  - job_name: anvil-worker
+    dns_sd_configs:
+      - names: ["worker"]
+        type: A
+        port: 9101

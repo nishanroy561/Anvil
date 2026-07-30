@@ -37,6 +37,17 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["anvil_api*"]
 
+# `trace_schema.json` and `graders_catalog.json` are vendored copies of the
+# contracts in packages/shared (ADR-0014, scripts/sync_schemas.py), read at
+# runtime by path. Without this they are *not installed* — they exist in the source
+# tree, so every test and every `uvicorn` run from a checkout works, and every
+# `pip install`ed copy 500s on the first ingest with FileNotFoundError.
+#
+# Found by `docker compose up` and one POST: ingest had never worked in the
+# container image, which is the documented install path for the whole product.
+[tool.setuptools.package-data]
+anvil_api = ["*.json"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # One event loop for the whole session: the app builds its SQLAlchemy engine and

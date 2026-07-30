@@ -34,6 +34,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["anvil_worker*"]
 
+# `graders_catalog.json` is read at runtime by path and is a build artifact of
+# scripts/sync_schemas.py, so it needs declaring or it is simply absent from an
+# installed copy — see the longer note in apps/api/pyproject.toml.
+[tool.setuptools.package-data]
+anvil_worker = ["*.json"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # One loop per session: the engine is built at import time and its pool is
