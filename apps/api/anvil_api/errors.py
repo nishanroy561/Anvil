@@ -67,6 +67,30 @@ def error_body(code: str, message: str, **extra: Any) -> dict:
     return {"error": {"code": code, "message": message, **extra}}
 
 
+def _error_response(
+    request: Request,
+    status: int,
+    code: str,
+    message: str,
+    headers: dict | None = None,
+    **extra: Any,
+) -> JSONResponse:
+    """Build an error response with the request id attached here, not relied upon
+    from the middleware.
+
+    The middleware adds `X-Request-ID` on the way out, which works for every
+    response that *returns* — but an unhandled exception is raised straight through
+    `call_next`, so the middleware never runs its tail and Starlette's outermost
+    error handler produces the 500 on its own. The header was therefore missing on
+    exactly the responses whose body says to quote it.
+    """
+    merged = dict(headers or {})
+    merged[REQUEST_ID_HEADER] = request_id(request)
+    return JSONResponse(
+        status_code=status, content=error_body(code, message, **extra), headers=merged
+    )
+
+
 def _from_detail(status: int, detail: Any) -> tuple[str, str, dict]:
     """Routers pass a dict; everything else passes a string or nothing.
 
@@ -97,12 +121,15 @@ def install(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):
         code, message, extra = _from_detail(exc.status_code, exc.detail)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=error_body(code, message, **extra),
+        return _error_response(
+            request,
+            exc.status_code,
+            code,
+            message,
             # 401s carry WWW-Authenticate, 429s carry Retry-After; dropping them
             # here would break the very clients that read them.
             headers=getattr(exc, "headers", None),
+            **extra,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -123,14 +150,13 @@ def install(app: FastAPI) -> None:
             # response larger than the request that caused it.
             for err in exc.errors()[:20]
         ]
-        return JSONResponse(
-            status_code=422,
-            content=error_body(
-                "invalid_request",
-                "Request body or parameters failed validation",
-                fields=fields,
-                field_count=len(exc.errors()),
-            ),
+        return _error_response(
+            request,
+            422,
+            "invalid_request",
+            "Request body or parameters failed validation",
+            fields=fields,
+            field_count=len(exc.errors()),
         )
 
     @app.exception_handler(Exception)
@@ -144,11 +170,10 @@ def install(app: FastAPI) -> None:
             "unhandled error on %s %s (request_id=%s)",
             request.method, request.url.path, request_id(request),
         )
-        return JSONResponse(
-            status_code=500,
-            content=error_body(
-                "internal_error",
-                "Something went wrong on our side. Quote the X-Request-ID header "
-                "if you report this.",
-            ),
+        return _error_response(
+            request,
+            500,
+            "internal_error",
+            "Something went wrong on our side. Quote the X-Request-ID header "
+            "if you report this.",
         )

@@ -77,9 +77,15 @@ test-plugins:          ## needs the example plugin installed to be meaningful
 
 # ── static checks ────────────────────────────────────────────────────────
 
-lint:
+lint:                  ## every Python tree, not just apps/ — the SDK, the
+                       ## examples and the scripts all had findings when this
+                       ## target only covered the two services.
 	cd apps/api && python -m ruff check .
 	cd apps/worker && python -m ruff check .
+	cd sdks/python && python -m ruff check .
+	cd examples/demo-rag-app && python -m ruff check .
+	cd examples/plugin-example && python -m ruff check .
+	python -m ruff check scripts
 
 typecheck:
 	cd apps/web && npx tsc --noEmit

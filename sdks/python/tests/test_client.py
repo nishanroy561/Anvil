@@ -5,7 +5,6 @@ No blocking, no exceptions, bounded memory.
 """
 
 import httpx
-import pytest
 import respx
 
 import anvil_sdk as anvil

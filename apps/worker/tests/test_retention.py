@@ -414,3 +414,16 @@ async def test_table_sizes_reports_real_tables():
     sizes = await ret.table_sizes()
     assert sizes["traces"] >= 0
     assert "spans" in sizes and "org_usage" in sizes
+
+
+async def test_the_daily_pass_records_table_sizes(project_factory, caplog):
+    """Growth is what this module manages, and "the database is large" is a
+    question answered by looking backwards through logs — so the number has to be
+    written down before anyone comes asking."""
+    import logging
+
+    await project_factory()
+    with caplog.at_level(logging.INFO, logger="anvil_worker.retention"):
+        await ret.Retention().tick()
+    assert "table sizes:" in caplog.text
+    assert "traces" in caplog.text

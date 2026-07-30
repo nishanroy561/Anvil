@@ -20,10 +20,6 @@ _enabled = False
 _tracer = None
 
 
-def enabled() -> bool:
-    return _enabled
-
-
 def setup() -> bool:
     """Instrument asyncpg and export over OTLP. Safe to call more than once."""
     global _enabled, _tracer
@@ -99,9 +95,13 @@ def persist_span(name: str, traceparents: list[str], batch_size: int):
         parent_ctx = contexts[0] if contexts else None
         links = []
         for ctx in contexts[1:]:
-            span = trace.get_current_span(ctx)
-            if span is not None:
-                links.append(trace.Link(span.get_span_context()))
+            span_context = trace.get_current_span(ctx).get_span_context()
+            # `extract()` on a garbled header returns an empty context rather than
+            # raising, and `get_current_span` then hands back INVALID_SPAN — so
+            # without this check a malformed traceparent becomes a link to trace
+            # id 0, which Tempo renders as a dangling reference.
+            if span_context.is_valid:
+                links.append(trace.Link(span_context))
 
         return _tracer.start_as_current_span(
             name,

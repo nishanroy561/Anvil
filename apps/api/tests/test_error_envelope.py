@@ -131,6 +131,13 @@ async def test_an_unhandled_error_becomes_a_clean_500():
         assert "Traceback" not in res.text
         # It points at the one thing that lets an operator find the log line.
         assert REQUEST_ID_HEADER.lower() in error["message"].lower()
+        # And that thing has to actually be on the response. It was not: an
+        # unhandled exception is raised straight through the request-id
+        # middleware, so the middleware never ran its tail and the header was
+        # missing on exactly the responses whose body says to quote it.
+        assert res.headers.get(REQUEST_ID_HEADER), (
+            "the 500 body tells the caller to quote a header that isn't there"
+        )
     finally:
         app.router.routes = [
             r for r in app.router.routes if getattr(r, "path", None) != "/v1/_boom_test"
@@ -141,11 +148,19 @@ async def test_an_unhandled_error_becomes_a_clean_500():
 
 
 async def test_every_response_carries_a_request_id(client, tenant):
+    """Success, a router error, a framework error, and a validation error — the id
+    is set in the handlers as well as the middleware, so no response shape depends
+    on middleware ordering to get one."""
     ok = await tenant.client.get("/v1/projects")
-    err = await client.get("/v1/projects")
-    assert (ok.status_code, err.status_code) == (200, 401)
-    for res in (ok, err):
-        assert res.headers[REQUEST_ID_HEADER]
+    unauth = await client.get("/v1/projects")
+    missing = await client.get("/v1/no-such-endpoint")
+    invalid = await client.post("/v1/auth/signup", json={"email": "nope"})
+
+    assert (ok.status_code, unauth.status_code, missing.status_code, invalid.status_code) == (
+        200, 401, 404, 422,
+    )
+    for res in (ok, unauth, missing, invalid):
+        assert res.headers[REQUEST_ID_HEADER], res.status_code
 
 
 async def test_request_ids_differ_between_requests(client):

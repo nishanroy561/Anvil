@@ -25,10 +25,6 @@ log = logging.getLogger(__name__)
 _enabled = False
 
 
-def enabled() -> bool:
-    return _enabled
-
-
 def setup(app) -> bool:
     """Instrument FastAPI, asyncpg and Redis, and export over OTLP.
 

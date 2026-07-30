@@ -22,7 +22,6 @@ import logging
 from datetime import datetime, timezone
 
 from redis.asyncio import Redis
-from redis.exceptions import RedisError
 
 from .graders import plugin_snapshot
 
@@ -58,7 +57,7 @@ class Announcer:
     async def tick(self) -> int:
         try:
             count = await publish(self.redis)
-        except (RedisError, Exception):  # noqa: B014 - deliberately everything
+        except Exception:  # noqa: BLE001 - a failed announce costs a listing, never the worker
             log.warning("could not announce the grader registry", exc_info=True)
             return 0
         if count:

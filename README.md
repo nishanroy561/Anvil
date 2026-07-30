@@ -183,8 +183,10 @@ published database ports. A few things to know before running this anywhere real
   target into the build.
 - Judge providers are also a build arg: `WORKER_EXTRAS=[judges,otel]`.
 
-Every setting is documented in [`.env.example`](.env.example), including a table of
-every rate limit and the surface it protects.
+[`.env.example`](.env.example) covers the settings you would actually change,
+including a table of every rate limit and the surface it protects. The exhaustive
+list — queue internals, timeouts, reclaim intervals — lives commented in
+`apps/api/anvil_api/config.py` and `apps/worker/anvil_worker/config.py`.
 
 ## Development
 

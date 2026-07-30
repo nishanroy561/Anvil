@@ -37,7 +37,7 @@ def test_nesting_parentage_and_schema(client, validate_batch):
 
 def test_host_exception_marks_error_and_propagates(client, validate_batch):
     with pytest.raises(ValueError, match="boom"):
-        with anvil.trace("failing") as t:
+        with anvil.trace("failing"):
             with anvil.span("step", type="tool"):
                 raise ValueError("boom")
 

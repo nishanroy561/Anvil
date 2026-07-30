@@ -245,7 +245,7 @@ async def main() -> int:
         items = session.get(f"/v1/datasets/{dataset['id']}/items").json()
         check("all six items are still there", items["total"] == 6, json.dumps(items)[:120])
         links = [i["source_trace_id"] for i in items["items"]]
-        check("every back-link went null, not the row", all(l is None for l in links),
+        check("every back-link went null, not the row", all(link is None for link in links),
               f"links {links}")
         first = items["items"][0]
         check("the input survived", bool((first.get("input") or {}).get("question")),

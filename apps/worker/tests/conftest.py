@@ -53,10 +53,29 @@ requires_services = pytest.mark.skipif(
     reason="needs Postgres+Redis: docker compose up -d postgres redis",
 )
 
-TRUNCATE_TABLES = (
-    "eval_results, eval_runs, dataset_items, datasets, "
-    "traces, spans, feedback, projects, organizations, users"
-)
+async def truncate_everything(conn) -> None:
+    """Empty every table except Alembic's own bookkeeping.
+
+    Read from the catalog rather than hardcoded. The hardcoded list named ten of
+    the sixteen tables and worked anyway, because the six it missed —
+    `api_keys`, `monitor_configs`, `monitor_scores`, `alert_rules`,
+    `alert_events`, `org_usage` — all have an FK path back to one that *was*
+    listed, so `CASCADE` reached them. That is a real dependency on something no
+    reader of the list can see, and it holds only until someone adds a table with
+    no such path, at which point state leaks between tests and the failure looks
+    like a flaky test rather than a fixture bug.
+    """
+    names = (
+        await conn.execute(
+            text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name <> 'alembic_version'"
+            )
+        )
+    ).scalars().all()
+    if names:
+        joined = ", ".join(f'"{n}"' for n in names)
+        await conn.execute(text(f"TRUNCATE {joined} RESTART IDENTITY CASCADE"))
 
 
 async def _recreate_database() -> None:
@@ -146,7 +165,7 @@ async def clean_state(database):
         return
 
     async with engine.begin() as conn:
-        await conn.execute(text(f"TRUNCATE {TRUNCATE_TABLES} RESTART IDENTITY CASCADE"))
+        await truncate_everything(conn)
     client = aioredis.from_url(TEST_REDIS_URL, decode_responses=True)
     await client.flushdb()
     await client.aclose()

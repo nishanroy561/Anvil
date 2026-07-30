@@ -246,6 +246,11 @@ class Retention:
             rolled = await recompute_usage()
         except Exception:
             log.exception("usage rollup failed")
+
+        try:
+            await log_table_sizes()
+        except Exception:
+            log.debug("could not read table sizes", exc_info=True)
         return deleted, rolled
 
     async def run(self) -> None:
@@ -266,6 +271,24 @@ class Retention:
             while slept < settings.retention_interval_s and not self._stop:
                 await asyncio.sleep(min(5.0, settings.retention_interval_s - slept))
                 slept += 5.0
+
+
+async def log_table_sizes(top: int = 5) -> None:
+    """Record the biggest tables once per daily pass.
+
+    This is what `table_sizes()` is *for*. Growth is the thing this module exists
+    to manage, and "the database is large" is a question an operator answers by
+    looking backwards through logs — so the number has to have been written down
+    before they came asking. One line a day is cheap enough to always emit.
+    """
+    sizes = await table_sizes()
+    if not sizes:
+        return
+    biggest = sorted(sizes.items(), key=lambda kv: kv[1], reverse=True)[:top]
+    log.info(
+        "table sizes: %s",
+        ", ".join(f"{name} {bytes_ / 1_048_576:.1f}MB" for name, bytes_ in biggest),
+    )
 
 
 async def table_sizes() -> dict[str, int]:

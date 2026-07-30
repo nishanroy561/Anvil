@@ -6,7 +6,7 @@ Later phases touch code, not schema. The special pieces:
 - unique (run_id, item_id) on eval_results — eval-run resume idempotency
 - partial unique (trace_id, user_ref) on feedback — repeat feedback upserts
 - ON DELETE CASCADE from traces to spans/feedback/monitor_scores; SET NULL on
-  dataset_items.source_trace_id (retention safety — plan/pricing.md §4)
+  dataset_items.source_trace_id (retention safety — plan/retention.md §1)
 
 Revision ID: 0001
 Revises:
