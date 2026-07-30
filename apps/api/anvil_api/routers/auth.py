@@ -1,3 +1,4 @@
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -18,6 +19,8 @@ from ..redis_client import get_redis
 from ..schemas.auth import LoginRequest, SignupRequest, UserOut
 from ..services.rate_limit import enforce_rate_limit
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
 # Generic message on every auth failure: no user enumeration.
@@ -29,10 +32,37 @@ def _slugify(name: str) -> str:
 
 
 async def _limit_auth(request: Request, email: str) -> None:
+    """Per-IP and per-email limits on the auth surface (checklist row 17).
+
+    `request.client.host` is only the real client when nothing sits in front of
+    the API. **Behind a reverse proxy it is the proxy**, so every login in the
+    deployment shares one bucket and the eleventh person to sign in that minute
+    gets a 429 — a self-inflicted outage rather than a weakened control. Uvicorn
+    rewrites `request.client` from `X-Forwarded-For`, but only for proxies listed
+    in `FORWARDED_ALLOW_IPS`, which defaults to loopback and therefore ignores a
+    proxy in another container.
+
+    So: if a forwarded header is present but uvicorn did not act on it, the
+    deployment is misconfigured. Warn loudly and fall back to the per-email limit
+    alone rather than throttling the whole install on one shared bucket. The
+    header is *not* trusted directly — anyone can send it, and doing so would let
+    an attacker pick their own bucket and bypass the limit entirely.
+    """
     settings = get_settings()
     redis = get_redis()
     ip = request.client.host if request.client else "unknown"
-    await enforce_rate_limit(redis, "auth:ip", ip, settings.auth_ip_limit_pm)
+
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded and forwarded.split(",")[0].strip() != ip:
+        log.warning(
+            "X-Forwarded-For is present but uvicorn did not apply it (peer=%s). "
+            "Set FORWARDED_ALLOW_IPS to your proxy's address, or the per-IP login "
+            "limit will meter every user into one bucket. Skipping it for now.",
+            ip,
+        )
+    else:
+        await enforce_rate_limit(redis, "auth:ip", ip, settings.auth_ip_limit_pm)
+
     await enforce_rate_limit(redis, "auth:email", email.lower(), settings.auth_email_limit_pm)
 
 

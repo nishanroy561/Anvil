@@ -36,12 +36,17 @@ def _serializer() -> URLSafeTimedSerializer:
 
 def set_session_cookie(response: Response, user_id: uuid.UUID) -> None:
     token = _serializer().dumps(str(user_id))
+    settings = get_settings()
     response.set_cookie(
         SESSION_COOKIE,
         token,
-        max_age=get_settings().session_max_age_s,
+        max_age=settings.session_max_age_s,
         httponly=True,
         samesite="lax",
+        # Derived from `web_origin` unless set explicitly. Without it a TLS
+        # deployment hands out a cookie a downgrade attack can read in cleartext,
+        # and with it hardcoded on, localhost logins silently fail to persist.
+        secure=settings.cookie_secure,
     )
 
 

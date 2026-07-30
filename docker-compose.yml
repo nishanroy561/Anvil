@@ -95,6 +95,13 @@ services:
       # default, which switches it off; the observability overlay sets it.
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: anvil-api
+      # Which peers may set X-Forwarded-For. Unset means loopback only, so a
+      # reverse proxy on another host or in another container is ignored and the
+      # per-IP login limit sees every user as one address. Set it to your proxy
+      # (or `*` if only the proxy can reach this port).
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-}
+      # Derived from WEB_ORIGIN when unset: https origin -> Secure cookie.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
     ports:
       - "8000:8000"
     depends_on:

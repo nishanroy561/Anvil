@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     deployment_mode: Literal["self_hosted", "cloud"] = "self_hosted"
     web_origin: str = "http://localhost:3000"
     session_max_age_s: int = 7 * 24 * 3600
+    # Whether the session cookie carries `Secure`. Unset derives it from
+    # `web_origin`: an https origin gets a Secure cookie, http does not — which is
+    # right in both cases and wrong in neither, so nobody has to remember it.
+    # Setting it explicitly overrides the inference.
+    session_cookie_secure: bool | None = None
 
     # Rate limits (fixed-window; ADR-0007). All per-minute.
     auth_ip_limit_pm: int = 10
@@ -55,6 +60,27 @@ class Settings(BaseSettings):
     retention_days: int | None = None
 
     admin_api_key: str = ""
+
+    @property
+    def cookie_secure(self) -> bool:
+        """Resolved `Secure` flag for the session cookie.
+
+        Derived from the public origin rather than defaulting to one answer: a
+        hardcoded `False` ships a downgradeable cookie to every TLS deployment,
+        and a hardcoded `True` makes the cookie silently not set on localhost,
+        which presents as "login does nothing" with no error anywhere.
+        """
+        if self.session_cookie_secure is not None:
+            return self.session_cookie_secure
+        return self.web_origin.strip().lower().startswith("https://")
+
+    @field_validator("session_cookie_secure", mode="before")
+    @classmethod
+    def _blank_bool_is_unset(cls, value):
+        """`SESSION_COOKIE_SECURE=` means "derive it", not "False"."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("retention_days", mode="before")
     @classmethod

@@ -50,4 +50,10 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
   CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"]
 
-CMD ["uvicorn", "anvil_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# `--proxy-headers` is uvicorn's default, but stated explicitly because the
+# behaviour it enables is load-bearing: behind a reverse proxy, `request.client`
+# has to come from X-Forwarded-For or the per-IP login limit meters every user
+# into one bucket. Uvicorn only honours the header from proxies listed in
+# FORWARDED_ALLOW_IPS (default: loopback), which is why that env var matters in
+# any deployment where the proxy is a separate container or host.
+CMD ["uvicorn", "anvil_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

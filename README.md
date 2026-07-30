@@ -163,25 +163,28 @@ passes a stopwatch and dies at five million. See `scripts/loadtest_reads.py`.
 
 ## Deployment
 
+Anvil deploys as five containers on one host. There is no cluster mode and no
+managed option — see [DEPLOY.md](DEPLOY.md) for the full guide, including the
+reverse proxy you have to bring yourself.
+
 ```bash
-export SECRET_KEY=$(openssl rand -hex 32)
+cp .env.example .env
+# then edit .env — at minimum SECRET_KEY, POSTGRES_PASSWORD, WEB_ORIGIN
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait
 ```
 
-Non-root containers, healthchecks on every service, two worker replicas, and no
-published database ports. A few things to know before running this anywhere real:
+The overlay gives you non-root containers, healthchecks on every service, two
+worker replicas, unpublished database ports, and `restart: always`.
 
-- **`SECRET_KEY` signs session cookies.** The base compose file defaults it so a
-  clean clone boots; the production overlay refuses to start without one.
-- **Postgres ships with the password `anvil`.** Change it. The base file binds it to
-  loopback and the overlay unpublishes it, but neither of those is a password.
-- **`RETENTION_DAYS` is unset by default**, meaning keep everything. Set it and the
-  worker deletes older traces in batches. Datasets are unaffected.
-- **No lockfile is committed for the web app**, so image builds resolve npm
-  dependencies fresh. Pin one before you rely on reproducible builds.
-- `WEB_API_BASE_URL` is a **build** arg, not a runtime one — Next bakes its rewrite
-  target into the build.
-- Judge providers are also a build arg: `WORKER_EXTRAS=[judges,otel]`.
+**Four things will bite you if you skip them**, and DEPLOY.md covers each:
+
+1. **`SECRET_KEY`** signs session cookies. The overlay refuses to start without it.
+2. **Postgres still has the password `anvil`.** Nothing enforces changing it.
+3. **`FORWARDED_ALLOW_IPS`** must name your reverse proxy, or the per-IP login
+   limit meters every user into one 10/min bucket. Anvil warns instead of locking
+   everyone out, but the fix is yours.
+4. **`WEB_API_BASE_URL` is a build arg**, not runtime — Next bakes its proxy target
+   into the image, so pointing it elsewhere means a rebuild.
 
 [`.env.example`](.env.example) covers the settings you would actually change,
 including a table of every rate limit and the surface it protects. The exhaustive
