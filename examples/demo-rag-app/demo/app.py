@@ -10,12 +10,14 @@ import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 import anvil_sdk as anvil
 from anvil_sdk.langchain import AnvilCallbackHandler
 
 from .chain import build_chain
+from .ui import PAGE
 
 chain = None
 
@@ -64,6 +66,12 @@ def _mask(value):
 
 
 app = FastAPI(title="Anvil demo RAG app", lifespan=lifespan)
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    """The ask-and-rate page — where the thumbs-down button actually lives."""
+    return PAGE
 
 
 class AskRequest(BaseModel):

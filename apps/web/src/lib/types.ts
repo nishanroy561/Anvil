@@ -24,6 +24,22 @@ export interface ApiKey {
   revoked_at: string | null;
 }
 
+/** Per-trace thumbs tally. Counts only — comments live on the detail response. */
+export interface FeedbackCounts {
+  negative: number;
+  positive: number;
+}
+
+export interface FeedbackEvent {
+  id: string;
+  trace_id: string;
+  /** -1 thumbs-down, +1 thumbs-up. */
+  rating: number;
+  comment: string | null;
+  user_ref: string | null;
+  created_at: string;
+}
+
 export interface TraceSummary {
   id: string;
   project_id: string;
@@ -39,6 +55,7 @@ export interface TraceSummary {
   metadata: Record<string, unknown> | null;
   started_at: string;
   ended_at: string | null;
+  feedback: FeedbackCounts;
 }
 
 export interface TraceListPage {
@@ -68,6 +85,20 @@ export interface TraceDetail extends TraceSummary {
   input: unknown;
   output: unknown;
   spans: Span[];
+  /** The entries behind `feedback`'s counts, newest first, comments included. */
+  feedback_events: FeedbackEvent[];
+}
+
+/** A downvoted trace nobody has turned into a test case yet (Phase 9). */
+export interface FailureInboxItem {
+  trace: TraceSummary;
+  feedback: FeedbackEvent[];
+  latest_feedback_at: string;
+}
+
+export interface FailureInboxPage {
+  items: FailureInboxItem[];
+  total: number;
 }
 
 export interface TimeBucket {
@@ -77,6 +108,8 @@ export interface TimeBucket {
   cost_usd: number;
   tokens_in: number;
   tokens_out: number;
+  feedback_negative: number;
+  feedback_positive: number;
 }
 
 export interface MetricsOverview {
@@ -87,6 +120,8 @@ export interface MetricsOverview {
   total_cost_usd: number;
   total_tokens_in: number;
   total_tokens_out: number;
+  total_feedback_negative: number;
+  total_feedback_positive: number;
   interval: "hour" | "day";
   buckets: TimeBucket[];
 }

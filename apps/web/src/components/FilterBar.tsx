@@ -2,12 +2,14 @@
 
 import clsx from "clsx";
 import { useEffect, useState } from "react";
+import { ThumbIcon } from "./Feedback";
 
 export interface Filters {
   q: string;
   status: string;
   name: string;
   model: string;
+  feedback: string; // "" | "negative" | "positive" | "none"
   range: string; // "1h" | "24h" | "7d" | "30d"
   metadataKey: string;
   metadataValue: string;
@@ -18,6 +20,7 @@ export const DEFAULT_FILTERS: Filters = {
   status: "",
   name: "",
   model: "",
+  feedback: "",
   range: "24h",
   metadataKey: "",
   metadataValue: "",
@@ -32,6 +35,30 @@ export function rangeToSince(range: string): string | undefined {
 
 const RANGES = ["1h", "24h", "7d", "30d"];
 const STATUSES = ["", "ok", "error", "in_progress", "abandoned"];
+
+// Deliberately not offering "any": a user who wants everything clears the filter,
+// and a fourth button would make the group harder to read for a case the cleared
+// state already covers.
+const FEEDBACK_OPTIONS = [
+  {
+    value: "negative",
+    label: "",
+    title: "Only traces an end user marked with a thumbs-down",
+    activeClass: "text-status-warn",
+  },
+  {
+    value: "positive",
+    label: "",
+    title: "Only traces an end user marked with a thumbs-up",
+    activeClass: "text-status-ok",
+  },
+  {
+    value: "none",
+    label: "unrated",
+    title: "Only traces with no end-user feedback at all",
+    activeClass: "text-ink",
+  },
+];
 
 /**
  * Controlled filter bar. Text inputs debounce 400 ms so typing doesn't spray
@@ -136,6 +163,41 @@ export function FilterBar({
         aria-label="Model filter"
         className="field w-36"
       />
+
+      {/* Feedback: a segmented toggle rather than another select, because
+          "show me what users complained about" is the one filter here people
+          reach for repeatedly and it deserves to be one click. Each button is
+          also a toggle — clicking the active one clears it. */}
+      <div
+        className="flex overflow-hidden rounded-md border border-line"
+        role="group"
+        aria-label="End-user feedback"
+      >
+        {FEEDBACK_OPTIONS.map((o) => {
+          const active = draft.feedback === o.value;
+          return (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => commit({ feedback: active ? "" : o.value })}
+              aria-pressed={active}
+              // The thumb buttons carry no visible text, so the name has to come
+              // from here — a title alone is not reliably announced.
+              aria-label={o.title}
+              title={o.title}
+              className={clsx(
+                "flex cursor-pointer items-center gap-1 px-2.5 py-1.5 font-mono text-2xs transition-colors duration-150",
+                active ? "bg-iron-800" : "bg-iron-900 hover:text-ink",
+                active ? o.activeClass : "text-ink-muted",
+              )}
+            >
+              {o.value === "negative" && <ThumbIcon down />}
+              {o.value === "positive" && <ThumbIcon down={false} />}
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
 
       {/* metadata k=v */}
       <div className="flex items-center overflow-hidden rounded-md border border-line bg-iron-900 transition-colors duration-150 focus-within:border-ember">

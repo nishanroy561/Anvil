@@ -175,6 +175,19 @@ def test_thumbs_down_posts_the_returned_trace_id():
     anvil.set_client(None)
 
 
+def test_the_page_serves_and_carries_the_vote_buttons():
+    """The button is the demo's whole Phase 9 story; a 200 with no 👎 on it would
+    pass a smoke test and demonstrate nothing."""
+    with TestClient(app) as client:
+        response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+    assert "vote-down" in body and "vote-up" in body
+    # It must post the id /ask handed back, to the endpoint that forwards it.
+    assert '"/feedback"' in body
+    assert "trace_id: traceId" in body
+
+
 def test_thumbs_down_does_not_break_when_anvil_is_unreachable():
     """A demo whose 👎 button 500s when Anvil is down would be advertising the
     opposite of ADR-0013."""

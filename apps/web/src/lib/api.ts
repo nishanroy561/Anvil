@@ -14,6 +14,7 @@ import type {
   DatasetItem,
   EvalResult,
   EvalRun,
+  FailureInboxPage,
   GraderInfo,
   MetricsOverview,
   Monitor,
@@ -102,6 +103,8 @@ export interface TraceFilters {
   status?: string;
   name?: string;
   model?: string;
+  /** "negative" | "positive" | "any" | "none" — end-user feedback on the trace. */
+  feedback?: string;
   since?: string;
   until?: string;
   metadataKey?: string;
@@ -116,6 +119,7 @@ export function traceQueryString(f: TraceFilters): string {
   if (f.status) params.set("status", f.status);
   if (f.name) params.set("name", f.name);
   if (f.model) params.set("model", f.model);
+  if (f.feedback) params.set("feedback", f.feedback);
   if (f.since) params.set("since", f.since);
   if (f.until) params.set("until", f.until);
   if (f.metadataKey && f.metadataValue) params.set(`metadata.${f.metadataKey}`, f.metadataValue);
@@ -130,6 +134,17 @@ export const listTraces = (projectId: string, filters: TraceFilters = {}) => {
 };
 
 export const getTrace = (traceId: string) => request<TraceDetail>(`/v1/traces/${traceId}`);
+
+// ---- feedback (Phase 9) ---------------------------------------------------
+
+/**
+ * Thumbs-down traces that are not yet in any dataset. Promotion is what clears
+ * an entry, so the queue drains as failures become test cases.
+ */
+export const failureInbox = (projectId: string, limit = 50, offset = 0) =>
+  request<FailureInboxPage>(
+    `/v1/projects/${projectId}/failure-inbox?limit=${limit}&offset=${offset}`,
+  );
 
 // ---- datasets (Phase 5) ---------------------------------------------------
 

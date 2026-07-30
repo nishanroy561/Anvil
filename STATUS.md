@@ -4,9 +4,98 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-30 (Phase 9 backend + acceptance; Phase 9 UI not built)
+Last updated: 2026-07-30 (Phase 9 complete — backend, acceptance and UI)
 
-## Phase 9 — feedback loop (2026-07-30). BACKEND DONE, acceptance passes. UI not started.
+## Phase 9 UI — built and verified in Chrome (2026-07-30)
+
+Built after the user's go-ahead, in the existing light neutral system — the
+design brief was already settled, so the work was to extend it, not restyle
+anything.
+
+- **`/p/[id]/inbox` — the failure inbox.** The one real design decision: **the
+  quote leads the row.** Every other list in this product is a grid of machine
+  facts, because that is what traces are. An inbox entry is different — someone
+  typed a sentence explaining what went wrong, and that sentence is the whole
+  reason the row deserves attention. It is set in the body face at reading size
+  with the user ref as attribution; name, status, model, latency, cost and "ran
+  Nd ago" are demoted to a mono strip beneath a hairline. A truncated cell in a
+  grid would bury the only text in the product a real end user wrote. Extra
+  downvotes on one trace collapse behind an "N more downvotes" disclosure, so one
+  much-complained-about trace can't push everything else off screen.
+- Checkbox column + selection bar reusing `AddToDataset`. **Promotion re-reads
+  from the server rather than filtering locally** — the server owns which entries
+  survive, and watching the count drop is the loop working.
+- **`components/Feedback.tsx`** — `FeedbackBadge` (list rows + trace header),
+  `FeedbackQuote`, `FeedbackPanel`, `ThumbIcon`. Never colour alone: a downvote is
+  amber *and* a downward thumb *and* a number, so it survives colour blindness,
+  greyscale and a glance at 11px. **Downvotes are amber, not the error red** — "the
+  request failed" and "the answer was wrong" are different problems, a drifted
+  trace still returns `ok`, and reusing the error hue would erase the distinction
+  the product is built on.
+- Trace detail: the badge sits **beside the status chip** (`ask · ok · 👎1`), which
+  is the argument for grading output made in two centimetres of screen, and the
+  quotes render above the waterfall — the complaint is why anyone opened the
+  trace, so it shouldn't be below 100 spans of timing.
+- Traces list: the Phase-4 placeholder column is wired, and the filter bar gained
+  a segmented 👎/👍/unrated group (each button also clears itself). No "any"
+  button — clearing the filter already covers it.
+- Sidebar: **Inbox** sits directly under Traces, with a tray icon rather than a
+  thumb (the thumb is the data; reusing it would imply the section is about votes
+  rather than the queue they produce).
+- Overview: a fifth **Downvotes** tile, amber and linking to the inbox, next to
+  error rate on purpose — it is the number errors cannot see. Plus an
+  `END-USER FEEDBACK / day` chart, and `metrics/overview` gained per-bucket vote
+  counts to feed it (bucketed on the **trace's** start time so the series is
+  comparable with `traces`; bucketing by vote time would put a backfill of old
+  votes in today's bar).
+- Demo app: `demo/ui.py` serves a real ask-and-rate page at `/`. Deliberately
+  **not** styled like the dashboard — it stands in for the customer's own product,
+  and the demo tells a clearer story if the observed app and the observability
+  console are visibly different surfaces.
+
+### Three chart defects found by looking at it, not by reasoning about it
+
+The dataviz procedure's last step is "render it and look at it", and all three of
+these survived code that read correctly.
+
+1. **The y-axis had two ticks both labelled "6"** — one meaning six upvotes, one
+   six downvotes — because a `Math.abs` tick formatter stripped the sign from an
+   auto-scaled asymmetric domain (`[-18, +6]`, which also parked zero near the top).
+   Fixed with a **symmetric domain and mirrored ticks**, which makes the repeated
+   label expected rather than wrong, the way a population pyramid reads.
+2. **`stackOffset="sign"` plus an explicit domain emitted `<rect height="-44">`,
+   and SVG silently drops a rect with negative height.** The amber bars were
+   *absent*, not short — which at page scale reads as "the data is tiny". Found by
+   dumping the SVG geometry from the DOM, the same technique the Phase 8 drift
+   chart needed. The stack was unnecessary: a negative value already draws
+   downward from zero, so two plain grouped bars render correctly and are
+   separately hoverable.
+3. **Spanning the chart across both grid columns turned 13 votes into a
+   250px-wide, 50px-tall slab.** Feedback is sparse — a window often holds two or
+   three populated buckets — and recharts spreads them to fill the container.
+   Reverted to one column and added `maxBarSize`. An empty grid cell is a smaller
+   problem than a chart with the wrong proportions.
+
+**A screenshot at page scale is not a verification.** Twice I read a
+downscaled JPEG as "the bars are flat/missing" when a `zoom` on the same region
+showed them rendering correctly, and once the reverse. Zoom into the chart, or
+read the geometry out of the DOM — the Phase 8 note said this and it was still
+worth relearning.
+
+**Verified in Chrome end to end**, signed in as the demo user against a live API +
+worker: a thumbs-down cast in the demo app at :8100 appeared at the top of the
+inbox with its comment ("22s ago" for the vote, "ran 1m ago" for the trace),
+selecting it and promoting into a new dataset removed the row and took the count
+7 → 6, `?feedback=negative` returned exactly the voted trace, and the trace detail
+showed `ok` and 👎1 side by side. `npx tsc --noEmit` and `npm run build` clean.
+
+**Not verified: the narrow-viewport pass.** No page or row horizontal overflow at
+the width tested, but the browser tool would not actually resize the window, and
+the app shell has a fixed `w-56` sidebar with no mobile treatment — a pre-existing
+property of every page here, not something this work introduced. Worth a human
+look, or Phase 11.
+
+## Phase 9 — feedback loop (2026-07-30). BACKEND DONE, acceptance passes.
 
 - **`POST /v1/feedback`** (API-key auth) queues and returns **202**; it never
   writes. That is not an optimization — **a thumbs-down routinely overtakes the
@@ -68,8 +157,8 @@ Last updated: 2026-07-30 (Phase 9 backend + acceptance; Phase 9 UI not built)
   two-value literal everywhere: a `0` would file feedback no filter surfaces and
   no inbox shows.
 - Demo app gained `POST /feedback` (one SDK call, then `anvil.flush()` so a demo
-  click shows up now rather than eventually). **The thumbs-down *button* is UI and
-  is not built** — see below.
+  click shows up now rather than eventually). The button itself is in `demo/ui.py`
+  — see the UI section above.
 - **Acceptance: `python scripts/feedback_acceptance.py` → PASSED**, 34 checks.
   API live over real HTTP; consumers driven a cycle at a time in-process, same
   rationale as Phase 8 (the deferred clock is the mechanism, so sleeping through
@@ -79,8 +168,8 @@ Last updated: 2026-07-30 (Phase 9 backend + acceptance; Phase 9 UI not built)
   toggle 👎/👍/👎 staying one row → another tenant's vote accepted at the edge and
   never written → promote clears the inbox → rescore run scores the promoted item
   `0.0` on `not_contains`. No provider credits spent.
-- **Test counts: API 174 (+18), worker 178 (+22), Python SDK 76 (+16), TS SDK 39
-  (+15), demo 8 (+2).** All green; `npx tsc --noEmit` clean in the TS SDK.
+- **Test counts: API 176 (+20), worker 178 (+22), Python SDK 76 (+16), TS SDK 39
+  (+15), demo 9 (+3).** All green; `npx tsc --noEmit` clean in the TS SDK.
 
 **A trap worth knowing (cost a debugging cycle):** `anvil.init()` calls
 `shutdown()` on whatever client was already installed, and shutdown **closes the
@@ -90,15 +179,6 @@ back afterwards hands you a client that queues happily and can never send — wh
 looks exactly like a broken endpoint. Build the client *after* the lifespan has
 run. The pre-existing demo tests never hit this because they only ever inspect
 `_queue` and never actually flush.
-
-### Phase 9 UI — specified, not built (needs the go-ahead)
-
-Backend for all of it is in place and tested. Outstanding per
-[evaluation §7](plan/evaluation.md): feedback badge + comments on the trace
-header, a `feedback=` control in the traces filter bar, bulk-select negatives →
-"Add to dataset" (the existing `AddToDataset` popover already takes many trace
-ids), a `/p/[id]/inbox` failure-inbox page, and an actual 👎 button in the demo
-app (it currently has the endpoint only).
 
 ## Phase 8 — monitors & alerts (2026-07-28). DONE, acceptance passes.
 
@@ -302,9 +382,8 @@ See "Phase 5 gaps" #1.** User gave the Phase 5 UI go-ahead.
 **Phase 6 (comparison & stats): DONE** — acceptance passes.
 **Phase 7 (CI gating): DONE** — acceptance passes.
 **Phase 8 (monitors & alerts): DONE** — acceptance passes.
-**Phase 9 (feedback loop): BACKEND DONE** — acceptance passes. The UI half
-(inbox page, badge, filter control, demo 👎 button) is specified above and awaits
-a go-ahead.
+**Phase 9 (feedback loop): DONE** — acceptance passes, UI built and checked in
+Chrome.
 Phases 10–11: not started (stubs with spec pointers exist).
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
@@ -519,10 +598,9 @@ API-death scenarios.
   and the 100-span no-jank check need a human at :3000 (no browser tooling in
   the build session). `npm run build` is clean.
 - Phase-4 leftovers: "Add to dataset" button is a disabled stub (Phase 5 wires
-  it); the feedback column still shows "—" — the API now serves per-row counts
-  (`TraceSummary.feedback`), so wiring it is part of the outstanding Phase 9 UI;
-  `/v1/ingest/stats` has no session-authed variant so the dashboard doesn't
-  surface ingest stats.
+  it); the feedback column was a placeholder "—" until **Phase 9 wired it** to
+  `TraceSummary.feedback`; `/v1/ingest/stats` still has no session-authed variant,
+  so the dashboard doesn't surface ingest stats.
 
 ### Phase 5 — backend built and verified (2026-07-21)
 
@@ -826,10 +904,10 @@ API-death scenarios.
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
    trace for jank. Worth a look at `/evals/compare` while there.
-2. **Phase 9 UI** — the backend and acceptance are done; the inbox page, trace
-   badge, `feedback=` filter control and the demo's 👎 button are not. Needs a
-   go-ahead (see the Phase 9 section at the top).
-3. Then 10 (retention) and 11 (hardening) per plan.md's phase table.
+2. **Phase 10 — retention** (plan/retention.md): the batched retention worker
+   (opt-in via `RETENTION_DAYS`) plus a usage-rollups panel with no quota bar.
+   `anvil_worker/retention.py` is still a spec-docstring stub.
+3. Then 11 (hardening) per plan.md's phase table.
 
 **Backfill worth doing at some point:** items promoted before ADR-0018 have no
 `metadata.recorded_output`, so their reference-comparing scores come back

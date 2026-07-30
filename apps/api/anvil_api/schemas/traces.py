@@ -86,6 +86,11 @@ class TimeBucket(BaseModel):
     cost_usd: float
     tokens_in: int
     tokens_out: int
+    # Bucketed by the *trace's* start time, not the vote's, so this series lines
+    # up with `traces` above: "of the traffic in this hour, N drew a complaint".
+    # Bucketing by vote time would put a backfill of old votes in today's bar.
+    feedback_negative: int = 0
+    feedback_positive: int = 0
 
 
 class MetricsOverview(BaseModel):
@@ -96,5 +101,7 @@ class MetricsOverview(BaseModel):
     total_cost_usd: float
     total_tokens_in: int
     total_tokens_out: int
+    total_feedback_negative: int = 0
+    total_feedback_positive: int = 0
     interval: str
     buckets: list[TimeBucket]

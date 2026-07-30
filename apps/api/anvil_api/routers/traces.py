@@ -329,6 +329,25 @@ async def metrics_overview(
         )
     ).all()
 
+    # Feedback rides a second query joined back to traces, bucketed on the
+    # trace's start time so the series is comparable with `traces` above. Folding
+    # it into the query above would multiply every aggregate by the number of
+    # votes on each trace.
+    feedback_rows = (
+        await session.execute(
+            select(
+                bucket,
+                func.count().filter(Feedback.rating < 0).label("negative"),
+                func.count().filter(Feedback.rating > 0).label("positive"),
+            )
+            .select_from(Feedback)
+            .join(Trace, Trace.id == Feedback.trace_id)
+            .where(and_(*filters))
+            .group_by(bucket)
+        )
+    ).all()
+    votes = {r.bucket: r for r in feedback_rows}
+
     return MetricsOverview(
         total_traces=totals.total,
         error_rate=(totals.errors / totals.total) if totals.total else 0.0,
@@ -337,6 +356,8 @@ async def metrics_overview(
         total_cost_usd=float(totals.cost),
         total_tokens_in=int(totals.tokens_in),
         total_tokens_out=int(totals.tokens_out),
+        total_feedback_negative=sum(r.negative for r in feedback_rows),
+        total_feedback_positive=sum(r.positive for r in feedback_rows),
         interval=interval,
         buckets=[
             TimeBucket(
@@ -346,6 +367,8 @@ async def metrics_overview(
                 cost_usd=float(r.cost),
                 tokens_in=int(r.tokens_in),
                 tokens_out=int(r.tokens_out),
+                feedback_negative=votes[r.bucket].negative if r.bucket in votes else 0,
+                feedback_positive=votes[r.bucket].positive if r.bucket in votes else 0,
             )
             for r in bucket_rows
         ],

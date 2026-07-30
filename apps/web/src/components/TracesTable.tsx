@@ -6,13 +6,17 @@ import { useRouter } from "next/navigation";
 import { useRef } from "react";
 import { formatAgo, formatCost, formatDuration, formatTime, formatTokens } from "@/lib/format";
 import type { TraceSummary } from "@/lib/types";
+import { FeedbackBadge } from "./Feedback";
 import { StatusBadge } from "./StatusBadge";
 import { Spinner } from "./ui";
 
 const ROW_H = 36;
 
+// The feedback column is wider than the old placeholder: it holds two glyph+count
+// pairs, and a trace with both a 👎 and a 👍 is exactly the ambiguous case worth
+// seeing at a glance.
 const GRID =
-  "grid grid-cols-[28px_92px_minmax(150px,1.4fr)_92px_minmax(120px,1fr)_84px_100px_90px_60px] items-center gap-x-3 px-4";
+  "grid grid-cols-[28px_92px_minmax(150px,1.4fr)_92px_minmax(120px,1fr)_84px_100px_90px_76px] items-center gap-x-3 px-4";
 
 /**
  * Virtualized list — only visible rows hit the DOM, so thousands of loaded
@@ -68,7 +72,7 @@ export function TracesTable({
         <span className="text-right">Duration</span>
         <span className="text-right">Tokens in/out</span>
         <span className="text-right">Cost</span>
-        <span className="text-right">Fb</span>
+        <span className="text-right">Feedback</span>
       </div>
 
       {/* rows */}
@@ -117,8 +121,9 @@ export function TracesTable({
                   <span className="text-right font-mono text-2xs text-ink">
                     {formatCost(t.total_cost_usd)}
                   </span>
-                  {/* feedback lands in Phase 9; the column exists so the layout doesn't shift */}
-                  <span className="text-right font-mono text-2xs text-ink-faint">—</span>
+                  <span className="flex justify-end">
+                    <FeedbackBadge counts={t.feedback} />
+                  </span>
                 </button>
               </div>
             );

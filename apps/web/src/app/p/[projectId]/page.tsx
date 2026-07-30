@@ -1,11 +1,12 @@
 "use client";
 
 import clsx from "clsx";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { metricsOverview } from "@/lib/api";
 import { formatCost, formatCount, formatDuration } from "@/lib/format";
 import type { MetricsOverview } from "@/lib/types";
-import { CostChart, TracesChart } from "@/components/OverviewCharts";
+import { CostChart, FeedbackChart, TracesChart } from "@/components/OverviewCharts";
 import { ErrorNote, Spinner } from "@/components/ui";
 
 const RANGES = [
@@ -19,25 +20,42 @@ function StatTile({
   value,
   sub,
   alarming,
+  attention,
+  href,
 }: {
   label: string;
   value: string;
   sub?: string;
   alarming?: boolean;
+  /** Amber rather than red: worth looking at, not necessarily broken. */
+  attention?: boolean;
+  href?: string;
 }) {
-  return (
-    <div className="rounded-lg border border-line bg-iron-900 p-4">
+  const body = (
+    <>
       <p className="font-mono text-2xs uppercase tracking-wider text-ink-faint">{label}</p>
       <p
         className={clsx(
           "mt-1.5 font-mono text-2xl font-medium tabular-nums tracking-tight",
-          alarming ? "text-status-error" : "text-ink",
+          alarming ? "text-status-error" : attention ? "text-status-warn" : "text-ink",
         )}
       >
         {value}
       </p>
       {sub && <p className="mt-0.5 font-mono text-2xs text-ink-muted">{sub}</p>}
-    </div>
+    </>
+  );
+
+  // A tile that is a link says so on hover; the rest stay inert.
+  return href ? (
+    <Link
+      href={href}
+      className="block rounded-lg border border-line bg-iron-900 p-4 transition-colors duration-150 hover:border-line-strong"
+    >
+      {body}
+    </Link>
+  ) : (
+    <div className="rounded-lg border border-line bg-iron-900 p-4">{body}</div>
   );
 }
 
@@ -92,7 +110,7 @@ export default function OverviewPage({ params }: { params: { projectId: string }
           </div>
         ) : metrics ? (
           <>
-            <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
               <StatTile label={`Traces · ${range.key}`} value={formatCount(metrics.total_traces)} />
               <StatTile
                 label="Error rate"
@@ -109,6 +127,20 @@ export default function OverviewPage({ params }: { params: { projectId: string }
                 value={formatCost(metrics.total_cost_usd)}
                 sub={`${formatCount(metrics.total_tokens_in)} in / ${formatCount(metrics.total_tokens_out)} out tokens`}
               />
+              {/* Next to error rate deliberately: this is the number errors can't
+                  see. Links to the inbox, because the only useful response to it
+                  is to go and read what people said. */}
+              <StatTile
+                label="Downvotes"
+                value={formatCount(metrics.total_feedback_negative)}
+                sub={
+                  metrics.total_feedback_positive > 0
+                    ? `${formatCount(metrics.total_feedback_positive)} up · triage in inbox`
+                    : "triage in inbox"
+                }
+                attention={metrics.total_feedback_negative > 0}
+                href={`/p/${params.projectId}/inbox`}
+              />
             </div>
 
             {metrics.total_traces === 0 ? (
@@ -119,6 +151,12 @@ export default function OverviewPage({ params }: { params: { projectId: string }
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <TracesChart metrics={metrics} />
                 <CostChart metrics={metrics} />
+                {/* Stays in one column, at the same size as the other two. Tried
+                    spanning it across both to fill the row: with only a handful
+                    of populated day-buckets the bars became 250px-wide, 50px-tall
+                    slabs that read as blocks rather than bars. An empty cell is a
+                    smaller problem than a chart with the wrong proportions. */}
+                <FeedbackChart metrics={metrics} />
               </div>
             )}
           </>

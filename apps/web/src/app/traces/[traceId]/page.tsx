@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError, getTrace } from "@/lib/api";
 import { formatCost, formatDateTime, formatDuration, formatTokens, shortId } from "@/lib/format";
 import type { TraceDetail } from "@/lib/types";
+import { FeedbackBadge, FeedbackPanel } from "@/components/Feedback";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Waterfall } from "@/components/Waterfall";
 import { SpanDetail } from "@/components/SpanDetail";
@@ -89,6 +90,10 @@ export default function TracePage({ params }: { params: { traceId: string } }) {
             {trace.name}
           </h1>
           <StatusBadge status={trace.status} />
+          {/* Beside the status on purpose: "the request succeeded" and "the user
+              hated the answer" are both facts about this trace, and the pair
+              side by side is the whole argument for grading output. */}
+          <FeedbackBadge counts={trace.feedback} />
           <span className="font-mono text-2xs text-ink-faint" title={trace.id}>
             {shortId(trace.id)}
           </span>
@@ -141,6 +146,10 @@ export default function TracePage({ params }: { params: { traceId: string } }) {
           </div>
         )}
       </header>
+
+      {/* What the users said, above the waterfall: the complaint is why anyone
+          opened this trace, so it should not be below 100 spans of timing. */}
+      <FeedbackPanel events={trace.feedback_events} />
 
       {/* waterfall + span panel */}
       <div className="flex min-h-0 flex-1">

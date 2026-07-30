@@ -15,6 +15,7 @@ function toApiFilters(f: Filters): TraceFilters {
     status: f.status || undefined,
     name: f.name.trim() || undefined,
     model: f.model.trim() || undefined,
+    feedback: f.feedback || undefined,
     since: rangeToSince(f.range),
     metadataKey: f.metadataKey.trim() || undefined,
     metadataValue: f.metadataValue.trim() || undefined,

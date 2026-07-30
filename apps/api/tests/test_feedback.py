@@ -362,6 +362,37 @@ async def test_inbox_is_newest_first_and_paginates(tenant):
     assert [i["trace"]["name"] for i in second["items"]] == ["t0"]
 
 
+async def test_overview_counts_votes_per_bucket(tenant):
+    """The series has to line up with `traces`: bucketed on the trace's start
+    time, and never multiplying the other aggregates."""
+    downvoted = await insert_trace(tenant.project_id, minutes=5)
+    await insert_feedback(tenant.project_id, downvoted, rating=-1, user_ref="u1")
+    await insert_feedback(tenant.project_id, downvoted, rating=-1, user_ref="u2")
+    await insert_feedback(tenant.project_id, downvoted, rating=1, user_ref="u3")
+    await insert_trace(tenant.project_id, minutes=5)
+
+    overview = (
+        await tenant.client.get(
+            f"/v1/projects/{tenant.project_id}/metrics/overview?interval=hour"
+        )
+    ).json()
+
+    assert overview["total_traces"] == 2, "three votes must not inflate the trace count"
+    assert overview["total_feedback_negative"] == 2
+    assert overview["total_feedback_positive"] == 1
+    votes = [(b["feedback_negative"], b["feedback_positive"]) for b in overview["buckets"]]
+    assert (2, 1) in votes
+
+
+async def test_overview_buckets_without_votes_report_zero(tenant):
+    await insert_trace(tenant.project_id)
+    overview = (
+        await tenant.client.get(f"/v1/projects/{tenant.project_id}/metrics/overview")
+    ).json()
+    assert overview["total_feedback_negative"] == 0
+    assert all(b["feedback_negative"] == 0 for b in overview["buckets"])
+
+
 async def test_inbox_and_filter_are_tenant_scoped(tenant_factory):
     mine = await tenant_factory("Mine")
     theirs = await tenant_factory("Theirs")

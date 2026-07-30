@@ -12,6 +12,9 @@ import { Wordmark } from "./Brand";
 const NAV = [
   { label: "Overview", path: "" },
   { label: "Traces", path: "/traces" },
+  // Sits directly under Traces: it is a filtered view of them, and the whole
+  // point is that it is the first place to look when users are complaining.
+  { label: "Inbox", path: "/inbox" },
   { label: "Datasets", path: "/datasets" },
   { label: "Evals", path: "/evals" },
   { label: "Monitors", path: "/monitors" },
@@ -26,6 +29,15 @@ function NavIcon({ label }: { label: string }) {
     Traces: (
       <>
         <path d="M2 4h9M5 8h9M3.5 12h7" />
+      </>
+    ),
+    // A tray with something in it — the "things waiting for you" shape, not a
+    // thumb: the thumb is the data, and reusing it here would imply this section
+    // is about votes rather than the queue they produce.
+    Inbox: (
+      <>
+        <path d="M2 9.5 3.6 3.2c.1-.4.5-.7.9-.7h7c.4 0 .8.3.9.7L14 9.5v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-3Z" />
+        <path d="M2 9.5h3l.8 1.6h4.4L11 9.5h3" />
       </>
     ),
     Datasets: (
