@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from redis.exceptions import RedisError
 
-from . import errors
+from . import errors, tracing
 from .config import get_settings
 from .metrics import DLQ_DEPTH, STREAM_DEPTH
 from .redis_client import get_redis
@@ -82,6 +82,10 @@ app.add_middleware(
 
 # /metrics for Prometheus (plan/observability.md §1).
 Instrumentator().instrument(app).expose(app)
+
+# OTLP traces for Tempo (plan/observability.md §4). Inert unless
+# OTEL_EXPORTER_OTLP_ENDPOINT is set, so this costs nothing by default.
+tracing.setup(app)
 
 app.include_router(health.router)
 app.include_router(auth.router)

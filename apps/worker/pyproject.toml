@@ -26,6 +26,14 @@ judges = [
     "langchain-groq>=0.2",
     "python-dotenv>=1.0",
 ]
+# The worker's half of the API → worker → Postgres trace. Same reasoning as the
+# API's `otel` extra; no FastAPI instrumentation here because the worker serves no
+# HTTP beyond its metrics port.
+otel = [
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.25",
+    "opentelemetry-instrumentation-asyncpg>=0.46b0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

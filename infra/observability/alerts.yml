@@ -29,11 +29,16 @@ groups:
           summary: "Consumer lag growing for 5m — worker stuck?"
 
       - alert: WorkerTargetDown
-        expr: up{job=~"anvil-worker-.*"} == 0
+        # `anvil-worker`, not `anvil-worker-.*`: the scrape job used to be split
+        # into anvil-worker-ingest/-eval/-schedulers, and the trailing `-.*` in
+        # that regex stopped matching the moment the jobs were merged into one —
+        # an alert rule that silently matches nothing, which is the worst kind.
+        # Prometheus discovers each replica as its own instance under this job.
+        expr: up{job="anvil-worker"} == 0
         for: 1m
         labels: { severity: critical }
         annotations:
-          summary: "A worker metrics target is down"
+          summary: "A worker metrics target is down ({{ $labels.instance }})"
 
   - name: anvil-api
     rules:

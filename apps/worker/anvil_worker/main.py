@@ -11,7 +11,7 @@ import signal
 import redis.asyncio as redis
 from prometheus_client import start_http_server
 
-from . import dogfood
+from . import dogfood, tracing
 from .alerter import Alerter
 from .announce import Announcer
 from .channels import load_channels
@@ -34,6 +34,9 @@ async def main() -> None:
     load_env()
     settings = get_settings()
     start_http_server(settings.metrics_port)
+    # OTLP traces for Tempo (plan/observability.md §4). Inert unless
+    # OTEL_EXPORTER_OTLP_ENDPOINT is set.
+    tracing.setup()
     load_pricing_resolvers()
     load_graders()
     load_channels()

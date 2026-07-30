@@ -29,6 +29,17 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
+# Distributed tracing of Anvil's own request path (plan/observability.md §4).
+# Optional because instrumentation costs latency on every request and an install
+# not running the observability profile has nowhere to send spans. Imported lazily
+# in tracing.py and inert unless OTEL_EXPORTER_OTLP_ENDPOINT is set, so a missing
+# package logs a warning rather than failing startup.
+otel = [
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.25",
+    "opentelemetry-instrumentation-fastapi>=0.46b0",
+    "opentelemetry-instrumentation-asyncpg>=0.46b0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

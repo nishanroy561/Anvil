@@ -14,12 +14,19 @@ services:
       POSTGRES_PASSWORD: anvil
       POSTGRES_DB: anvil
     ports:
-      # Loopback only. The host needs this to run psql and the test suite, but
+      # Loopback only. The host needs this for psql and the test suite, but
       # `5432:5432` binds 0.0.0.0 — an open Postgres with the password `anvil` on
-      # every interface the machine has, which on any shared network is the whole
-      # database. Nothing inside compose uses this mapping; services reach each
-      # other by service name over the compose network.
+      # every interface the machine has. Nothing inside compose uses this mapping;
+      # services reach each other by service name over the compose network.
+      #
+      # **Both loopback stacks, and that is not redundant.** Binding IPv4 alone
+      # made every `localhost` connection from a Windows host take ~2 s: the
+      # resolver returns `::1` first, nothing is listening there, and the client
+      # waits out a connect timeout before retrying 127.0.0.1. It turned the test
+      # suite's per-test Redis reconnect into 2 s of dead time and the worker suite
+      # from 1 minute into 10.
       - "127.0.0.1:5432:5432"
+      - "[::1]:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -35,9 +42,10 @@ services:
     # restart or ingestion's zero-loss guarantee is void (ADR-0002).
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      # Loopback only — same reasoning as postgres above. Redis has no password
-      # at all, so this one matters more.
+      # Loopback only — same reasoning as postgres above, both stacks for the same
+      # reason. Redis has no password at all, so the binding matters more here.
       - "127.0.0.1:6379:6379"
+      - "[::1]:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -67,7 +75,13 @@ services:
     restart: "no"
 
   api:
-    build: apps/api
+    build:
+      context: apps/api
+      args:
+        # `[otel]` pulls in the OpenTelemetry packages. Kept on by default so the
+        # observability profile works without a rebuild; the exporter itself stays
+        # inert unless OTEL_EXPORTER_OTLP_ENDPOINT is set below.
+        API_EXTRAS: ${API_EXTRAS:-[otel]}
     environment:
       DATABASE_URL: postgresql+asyncpg://anvil:anvil@postgres:5432/anvil
       REDIS_URL: redis://redis:6379/0
@@ -77,6 +91,10 @@ services:
       # Reported to the usage panel, never acted on by the API — the worker owns
       # deletion (ADR-0022). Unset means keep everything.
       RETENTION_DAYS: ${RETENTION_DAYS:-}
+      # Tracing Anvil's own request path (plan/observability.md §4). Unset by
+      # default, which switches it off; the observability overlay sets it.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: anvil-api
     ports:
       - "8000:8000"
     depends_on:
@@ -89,7 +107,13 @@ services:
     restart: unless-stopped
 
   worker:
-    build: apps/worker
+    build:
+      context: apps/worker
+      args:
+        # `[otel]` for tracing. `[judges]` is *not* default: three provider SDKs
+        # for a feature many installs never use. Set WORKER_EXTRAS=[judges,otel]
+        # to build an image that can run LLM graders.
+        WORKER_EXTRAS: ${WORKER_EXTRAS:-[otel]}
     environment:
       DATABASE_URL: postgresql+asyncpg://anvil:anvil@postgres:5432/anvil
       REDIS_URL: redis://redis:6379/0
@@ -100,6 +124,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: anvil-worker
     # No published port: with replicas a fixed host port collides, and Prometheus
     # reaches 9101 over the compose network by DNS anyway.
     depends_on:
@@ -156,6 +182,12 @@ services:
     volumes:
       - ./infra/observability/tempo.yml:/etc/tempo.yml:ro
       - tempodata:/var/tempo
+    ports:
+      # Grafana reaches Tempo over the compose network, so this is only for
+      # querying it directly — which is exactly what verifying an end-to-end trace
+      # needs, and what was missing when that verification was first attempted.
+      - "127.0.0.1:3200:3200"
+      - "[::1]:3200:3200"
     restart: unless-stopped
 
   otel-collector:

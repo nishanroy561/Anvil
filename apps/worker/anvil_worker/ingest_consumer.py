@@ -26,6 +26,7 @@ from redis.exceptions import RedisError, ResponseError
 from sqlalchemy import and_, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from . import tracing
 from .config import get_settings
 from .db import transaction
 from .derive import derive_trace_fields, parse_ts
@@ -365,11 +366,17 @@ class IngestConsumer:
 
         started = time.perf_counter()
         traces, message_ids, undecodable = [], [], []
+        # W3C parents the API stamped on each message, so one ingest request is a
+        # single trace across the queue (plan/observability.md §4). Empty when OTel
+        # is off, which is the default.
+        traceparents: list[str] = []
 
         for message_id, fields in entries:
             try:
                 traces.append(json.loads(fields["payload"]))
                 message_ids.append(message_id)
+                if parent := fields.get("traceparent"):
+                    traceparents.append(parent)
             except (KeyError, json.JSONDecodeError):
                 # Malformed beyond repair — no number of retries fixes it.
                 undecodable.append(message_id)
@@ -378,7 +385,8 @@ class IngestConsumer:
             await self._dead_letter(message_id, reason="undecodable_payload")
 
         if traces:
-            written, spans_written = await self.persist(traces)
+            with tracing.persist_span("ingest.persist", traceparents, len(traces)):
+                written, spans_written = await self.persist(traces)
             # Ack only after the transaction commits. A crash before this point
             # leaves the entries pending, and reclaim replays them — the source
             # of at-least-once delivery, and why the guards must be idempotent.

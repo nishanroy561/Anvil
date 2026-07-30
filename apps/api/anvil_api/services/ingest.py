@@ -19,6 +19,7 @@ from redis.exceptions import RedisError
 
 from ..metrics import INGEST_ACCEPTED, INGEST_REJECTED, TRUNCATED_FIELDS
 from ..streams import STATS_KEY, TRACES_STREAM
+from ..tracing import traceparent
 from .normalize import normalize_trace
 
 log = logging.getLogger(__name__)
@@ -67,15 +68,28 @@ async def publish_traces(
     truncated_total = 0
     pipe = redis.pipeline(transaction=False)
 
+    # The one place Anvil's own request context can cross into the worker. The
+    # API's durable act is this XADD; the worker reads it later, on another
+    # connection, in another process — so a distributed trace only spans the two
+    # if the parent is written into the message (plan/observability.md §4).
+    # None when OTel is off, which is the default, and then this is a no-op.
+    parent = traceparent()
+
     for trace in traces:
         normalize_trace(trace, max_field_bytes)
         stats = trace.pop("_anvil_stats", {})
         truncated_total += stats.get("truncated_fields", 0)
 
         trace["project_id"] = str(project_id)
+        fields = {"payload": json.dumps(trace, default=str)}
+        if parent:
+            # A separate stream field, not a key inside the payload: the payload is
+            # validated against the trace wire schema, which forbids unknown
+            # properties, and telemetry has no business in the customer's data.
+            fields["traceparent"] = parent
         pipe.xadd(
             TRACES_STREAM,
-            {"payload": json.dumps(trace, default=str)},
+            fields,
             maxlen=maxlen,
             approximate=True,
         )

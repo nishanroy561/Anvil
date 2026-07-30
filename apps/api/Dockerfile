@@ -15,6 +15,12 @@ COPY anvil_api ./anvil_api
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir .
 
+# Distributed tracing is an extra, so it is a build-time choice: the packages are
+# only useful alongside the observability profile, and they instrument every
+# request. Build with `--build-arg API_EXTRAS=[otel]` to include them.
+ARG API_EXTRAS=""
+RUN if [ -n "$API_EXTRAS" ]; then pip install --no-cache-dir ".${API_EXTRAS}"; fi
+
 
 FROM python:3.11-slim AS runtime
 
