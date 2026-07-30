@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { listApiKeys, listProjects } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { ApiKey, Project } from "@/lib/types";
+import { UsagePanel } from "@/components/UsagePanel";
 import { CopyButton, ErrorNote, Spinner } from "@/components/ui";
 
 async function createKey(projectId: string, name: string) {
@@ -165,6 +166,20 @@ export default function SettingsPage({ params }: { params: { projectId: string }
               {busy ? <Spinner className="text-iron-950" /> : "Create key"}
             </button>
           </form>
+        </section>
+
+        {/* usage */}
+        <section>
+          <div className="mb-2 flex items-baseline gap-2">
+            <h2 className="font-mono text-2xs uppercase tracking-wider text-ink-faint">Usage</h2>
+            {/* Everything else on this page is about one project; this is not.
+                Saying so is the difference between a number and a wrong number
+                for anyone whose org has more than one project. */}
+            <span className="font-mono text-2xs text-ink-faint">
+              · every project in this organization
+            </span>
+          </div>
+          <UsagePanel />
         </section>
       </div>
     </div>

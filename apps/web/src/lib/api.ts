@@ -24,6 +24,7 @@ import type {
   RunComparison,
   TraceDetail,
   TraceListPage,
+  UsageSummary,
   UserOut,
 } from "./types";
 
@@ -95,6 +96,14 @@ export const createProject = (name: string) =>
 
 export const listApiKeys = (projectId: string) =>
   request<ApiKey[]>(`/v1/projects/${projectId}/api-keys`);
+
+/**
+ * Usage rollups (Phase 10). **Org-scoped, not project-scoped** — there is no
+ * project id in the path because usage is a property of the organization, and
+ * anything rendering this has to say so.
+ */
+export const getUsage = (months = 12) =>
+  request<UsageSummary>(`/v1/usage?months=${months}`);
 
 // ---- traces ---------------------------------------------------------------
 

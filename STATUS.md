@@ -4,9 +4,39 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-30 (Phase 10 backend + acceptance; usage panel UI not built)
+Last updated: 2026-07-30 (Phase 10 complete — Phases 0–10 done; only 11 remains)
 
-## Phase 10 — retention & housekeeping (2026-07-30). BACKEND DONE, acceptance passes.
+## Phase 10 usage panel — built and verified in Chrome (2026-07-30)
+
+`components/UsagePanel.tsx`, mounted as a **Settings → Usage** section.
+
+- **Labelled "every project in this organization".** Everything else on that page
+  is about one project; usage is not. Without the label the number is simply
+  wrong for anyone whose org holds more than one project.
+- Two headline counts for the current month, then a month table. **A table, not a
+  chart** — twelve rows of two numbers in a 672px settings column is a reading
+  task, and the bar behind each row carries the trend without an axis, a legend
+  or a chart library.
+- **No quota bar, no percentage, no CTA.** ADR-0019 leaves nothing to be over, and
+  a bar implies a ceiling implies an upgrade that does not exist.
+- The retention window is stated in plain language — "Traces are deleted 30 days
+  after they arrive" or "Traces are kept forever" — plus, when a window is set,
+  the line that preempts the ADR-0022 question a user would otherwise ask:
+  *these counts are what was ingested, so they don't fall when retention deletes
+  the traces later.* Both branches checked on screen.
+- Empty state says the worker rolls up once a day, so a fresh install showing
+  nothing is not an error.
+
+**One defect, found by measuring rather than looking.** The bar started as a flex
+child sharing a row with its number, so its percentage resolved against whatever
+space the number left — every month near the peak saturated to the same width, and
+64,200 drew an identical bar to 72,300. The screenshot looked plausible. Reading
+`getBoundingClientRect().width` out of the DOM is what caught it. The fix gives
+the track its own grid column and fixed-width number columns, so all rows share
+one baseline: fills now measure 354 / 314 / 254 / 190 / 105 px against a 72,300
+peak, which is proportional to four significant figures.
+
+## Phase 10 — retention & housekeeping (2026-07-30). DONE, acceptance passes.
 
 - **`retention.py`** is one daily loop with two jobs. **Retention deletes traces
   older than `RETENTION_DAYS`; unset is the default and means keep everything** —
@@ -59,13 +89,6 @@ Last updated: 2026-07-30 (Phase 10 backend + acceptance; usage panel UI not buil
   26 traces; **its 24 datasets and 387 items were never at risk**, which is the
   phase's guarantee demonstrated on real data rather than in a fixture.
 - **Test counts: API 186 (+10), worker 197 (+19).** All green.
-
-### Phase 10 UI — specified, not built (needs a go-ahead)
-
-`GET /v1/usage` is live and tested. Outstanding: a **Settings → Usage** panel —
-traces ingested and eval items graded per month, the configured retention window
-stated in plain language (or "traces are kept forever"), and no quota bar, no
-percentage, no CTA (plan/retention.md §2, ADR-0019).
 
 
 
@@ -447,9 +470,12 @@ See "Phase 5 gaps" #1.** User gave the Phase 5 UI go-ahead.
 **Phase 8 (monitors & alerts): DONE** — acceptance passes.
 **Phase 9 (feedback loop): DONE** — acceptance passes, UI built and checked in
 Chrome.
-**Phase 10 (retention & housekeeping): BACKEND DONE** — acceptance passes. The
-usage panel awaits a go-ahead (see the Phase 10 section at the top).
-Phase 11: not started.
+**Phase 10 (retention & housekeeping): DONE** — acceptance passes, usage panel
+built and checked in Chrome.
+**Phase 11 (hardening & polish) is the only phase left**: prod compose profile,
+the `{"error": …}` envelope sweep + request IDs + a rate-limit audit, a 50k load
+test with the observability profile up, a README rewrite, plugin entry-point
+loading, `DEMO.md`, and `make test` green everywhere.
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -970,9 +996,9 @@ API-death scenarios.
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
    trace for jank. Worth a look at `/evals/compare` while there.
-2. **Phase 10 usage panel** — the worker, `GET /v1/usage` and the acceptance are
-   done; **Settings → Usage** is not. Needs a go-ahead.
-3. Then 11 (hardening) per plan.md's phase table — the last phase.
+2. **Phase 11 — hardening & polish** (plan.md's "Phase 11 detail"), the last
+   phase. Seven items; the load test and the plugin-loading work are the two with
+   real unknowns in them.
 
 **Backfill worth doing at some point:** items promoted before ADR-0018 have no
 `metadata.recorded_output`, so their reference-comparing scores come back

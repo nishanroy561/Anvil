@@ -101,6 +101,27 @@ export interface FailureInboxPage {
   total: number;
 }
 
+// ---- usage rollups (Phase 10) ---------------------------------------------
+
+/** One org-month. Counters only ever move up (ADR-0022): `traces_ingested` means
+ *  "ingested during this month", so retention deleting the traces doesn't reduce
+ *  it. There is deliberately no quota or limit field — Anvil has no tiers. */
+export interface UsageMonth {
+  month: string;
+  traces_ingested: number;
+  eval_items: number;
+  /** Always null: per-org bytes are not honestly attributable (ADR-0022). */
+  storage_bytes: number | null;
+  updated_at: string | null;
+}
+
+export interface UsageSummary {
+  months: UsageMonth[];
+  /** null means traces are kept forever. */
+  retention_days: number | null;
+  current_month: UsageMonth | null;
+}
+
 export interface TimeBucket {
   bucket: string;
   traces: number;
