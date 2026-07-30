@@ -138,11 +138,12 @@ services:
     restart: unless-stopped
 
   web:
-    build: apps/web
-    environment:
-      # Where the *web server* reaches the API, not the browser — the browser goes
-      # through the /api rewrite so the session cookie stays first-party.
-      WEB_API_BASE_URL: ${WEB_API_BASE_URL:-http://api:8000}
+    build:
+      context: apps/web
+      args:
+        # A *build* arg, because Next bakes `rewrites()` into the build — see the
+        # note in apps/web/Dockerfile. Overriding it needs a rebuild, not a restart.
+        WEB_API_BASE_URL: ${WEB_API_BASE_URL:-http://api:8000}
     ports:
       - "3000:3000"
     depends_on:

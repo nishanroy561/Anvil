@@ -10,6 +10,17 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# Build-time, not runtime, and that distinction cost an afternoon: `rewrites()` in
+# next.config.mjs is evaluated during `next build` and serialized into the routes
+# manifest, so the /api proxy target is frozen into the image. Setting
+# WEB_API_BASE_URL on the *container* has no effect — the process reads the baked
+# value and, with the default, tries to reach the API at its own localhost.
+#
+# Compose passes `http://api:8000`. Point it elsewhere by rebuilding:
+#   docker compose build --build-arg WEB_API_BASE_URL=https://anvil.internal web
+ARG WEB_API_BASE_URL=http://api:8000
+ENV WEB_API_BASE_URL=${WEB_API_BASE_URL}
 RUN npm run build
 
 

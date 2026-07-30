@@ -4,7 +4,95 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-30 (Phase 10 complete — Phases 0–10 done; only 11 remains)
+Last updated: 2026-07-30 (**Phase 11 complete — all 12 phases done**)
+
+## Phase 11 — hardening & polish (2026-07-30). DONE, all seven items.
+
+Committed in five parts; the details are in those commit messages. What a reader
+of this file needs to know:
+
+**§2 sweeps.** Every failure returns `{"error": {"code", "message"}}`, reshaped in
+two exception handlers rather than thirty call sites. Router extras and response
+headers survive the envelope (a 429 without `Retry-After` is a 429 nobody can back
+off from). `X-Request-ID` on every response — **in the header, not the body**,
+because putting it in the body broke Phase 1's byte-identical-401 property and a
+random field turns an auditable invariant into one every reader must re-derive.
+The rate-limit audit found the dozens of session read routes had *no limiter at
+all*; `SESSION_READ_LIMIT_PM` covers them on GET/HEAD only.
+
+**§5 plugins.** `examples/plugin-example` is a real installable package;
+`PLUGINS.md` is the author guide. Writing the guide exposed two bugs — see below.
+
+**§1 prod images.** Multi-stage, non-root, healthchecks, a `migrate` one-shot
+service, and `docker-compose.prod.yml` as an *overlay* (profiles cannot change a
+service, only add or remove one) with two workers and mandatory `SECRET_KEY`.
+
+**§3 load test + observability.** `scripts/loadtest_reads.py`: at 50k traces every
+read is 14–33 ms against a 500 ms budget, keyset paging is flat to page 12, and
+search reaches `ix_traces_search_trgm` with no seq scan — closing a STATUS item
+open since Phase 2. The observability profile had never been booted; it boots, and
+observability.md §4 now passes in full including the Tempo end-to-end trace.
+
+**§4/§6/§7 docs and `make test`.** `README.md` rewritten from the original brief
+paragraph into a project front page with screenshots in `docs/screenshots/`.
+`DEMO.md` is the five-minute path, every command of it executed. `make test` runs
+all five suites (**558 tests**), and `make lint` is clean.
+
+### Nine real bugs Phase 11 found, and how
+
+The pattern worth carrying forward: **every one came from running the thing in a
+shape it had not been run in before** — a built image, a booted profile, a fresh
+volume, a measured fixture. None came from reading code.
+
+1. **Ingest had never worked in the Docker image.** `trace_schema.json` and
+   `graders_catalog.json` are read at runtime by path and were not declared as
+   package data, so they exist in a checkout — every test, every `uvicorn` from
+   source — and are absent from every `pip install`. One POST to a built image
+   returned `FileNotFoundError`. That is the documented install path for the whole
+   product.
+2. **`RETENTION_DAYS=` crashed the API at import.** Compose renders
+   `${RETENTION_DAYS:-}` as an empty string and pydantic would not read `""` as
+   `int | None`, so the API crash-looped on its own default configuration —
+   and `.env.example` ships that same blank value.
+3. **`WEB_API_BASE_URL` in `.env` broke the dashboard in compose.** Next bakes
+   `rewrites()` into the build, so it is a *build* arg; a runtime value is ignored
+   and the container tried to reach the API at its own localhost. `.env.example`
+   now leaves it unset, because the two correct values are both already defaults.
+4. **`GET /v1/graders` never showed installed plugins**, which plugins.md §5
+   requires and `PLUGINS.md` had just claimed. Fixed by
+   [ADR-0023](plan/adr/0023-worker-announces-its-grader-registry-over-redis.md).
+5. **`run_grader` required `isinstance(result, GradeResult)`**, forcing every
+   plugin to import from `anvil_worker` — the exact dependency entry points exist
+   to avoid, and stricter than the `Protocol` the spec specifies.
+6. **A plugin announcing an unknown `kind` 500'd the whole picker**, since it is a
+   two-value `Literal` on the response model. One plugin's nonsense must not cost
+   everyone their grader list.
+7. **`up{job=~"anvil-worker-.*"}` matched nothing.** Merging the three worker
+   scrape jobs into one left the alert's trailing `-.*` matching no series — a
+   rule that silently never fires, the worst kind.
+8. **`static_configs` would have scraped one of two worker replicas** and silently
+   ignored the other. DNS discovery finds both. (Two of the three original targets
+   were also permanently down, from a design where each loop had its own port.)
+9. **My own IPv6 regression, found by measuring.** Binding Postgres and Redis to
+   `127.0.0.1` for hardening made the ports IPv4-only, so every `localhost`
+   connection from this Windows host resolved `::1` first and waited out a connect
+   timeout: 2 s per Redis reconnect, worker suite 53 s → 586 s. Publishing both
+   loopback stacks keeps the hardening and the speed.
+
+**Also worth knowing:** `test_grader_catalog` compared the catalog against the
+*live* registry, so installing the example plugin made the suite fail — a test
+that breaks when a supported feature is used. It now reads built-ins from the
+modules.
+
+### One thing deliberately not done
+
+`docker-compose.prod.yml` has no TLS, no reverse proxy, and no secret management.
+Those are deployment-environment concerns with no single right answer, and a
+half-configured nginx in the repo would be worse than none. The README's
+deployment section says so plainly, along with the four things to change before
+running it anywhere real.
+
+
 
 ## Phase 10 usage panel — built and verified in Chrome (2026-07-30)
 
@@ -472,10 +560,11 @@ See "Phase 5 gaps" #1.** User gave the Phase 5 UI go-ahead.
 Chrome.
 **Phase 10 (retention & housekeeping): DONE** — acceptance passes, usage panel
 built and checked in Chrome.
-**Phase 11 (hardening & polish) is the only phase left**: prod compose profile,
-the `{"error": …}` envelope sweep + request IDs + a rate-limit audit, a 50k load
-test with the observability profile up, a README rewrite, plugin entry-point
-loading, `DEMO.md`, and `make test` green everywhere.
+**Phase 11 (hardening & polish): DONE** — all seven items; see the section at the
+top of this file.
+
+**All 12 phases (0–11) are complete.** `make test` is green across five suites
+(558 tests) and `make lint` is clean.
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -996,9 +1085,11 @@ API-death scenarios.
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
    trace for jank. Worth a look at `/evals/compare` while there.
-2. **Phase 11 — hardening & polish** (plan.md's "Phase 11 detail"), the last
-   phase. Seven items; the load test and the plugin-loading work are the two with
-   real unknowns in them.
+2. **v1 is done.** The [post-v1 backlog](plan.md#post-v1-backlog-deferred-deliberately--add-after-phase-11-completes)
+   in plan.md is the deliberate next list — nothing on it was skipped by accident.
+   The two things I would do first: commit an `npm` lockfile for the web app so
+   image builds are reproducible, and put TLS/reverse-proxy guidance in front of
+   the production overlay.
 
 **Backfill worth doing at some point:** items promoted before ADR-0018 have no
 `metadata.recorded_output`, so their reference-comparing scores come back

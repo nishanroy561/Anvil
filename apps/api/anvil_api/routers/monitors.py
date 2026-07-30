@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import Caller, current_caller
 from ..db import get_session
 from ..deps import NOT_FOUND, owned_project
-from ..models import AlertEvent, AlertRule, MonitorConfig, MonitorScore, Project
+from ..models import AlertEvent, AlertRule, MonitorConfig, MonitorScore
 from ..schemas.monitoring import (
     AlertEventOut,
     AlertRuleCreate,

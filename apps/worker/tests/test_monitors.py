@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import insert, select, text
 
 from anvil_worker import alerter as alerter_mod
 from anvil_worker import sampler as sampler_mod

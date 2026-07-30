@@ -7,8 +7,6 @@ validation error, a status raised by the framework, and an unhandled exception.
 
 import uuid
 
-import pytest
-from fastapi import HTTPException
 
 from anvil_api.errors import REQUEST_ID_HEADER
 from anvil_api.main import app

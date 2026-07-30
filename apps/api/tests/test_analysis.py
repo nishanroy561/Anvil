@@ -7,7 +7,6 @@ statistics module that only proves it can find an effect is half-tested, and
 the half it skipped is the half this product exists for.
 """
 
-import math
 import uuid
 
 import pytest

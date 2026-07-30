@@ -9,7 +9,6 @@ dataset must survive the deletion of the traces it was built from.
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from sqlalchemy import text
 
 from anvil_worker import retention as ret

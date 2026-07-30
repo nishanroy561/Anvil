@@ -17,7 +17,7 @@ Two invariants (plugins.md §3):
 
 import asyncio
 import logging
-from typing import Any, Protocol
+from typing import Protocol
 
 from .config import get_settings
 

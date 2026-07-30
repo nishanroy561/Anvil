@@ -1,0 +1,38 @@
+# The credit-free variant of eval.yaml, used by DEMO.md.
+#
+#   anvil eval run --config eval.rescore.yaml --dataset <id> --wait \
+#     --min-score not_contains=0.8
+#
+# Two differences from eval.yaml, and both matter for what each is *for*:
+#
+# `mode: rescore` grades the outputs already stored on the dataset items and never
+# calls a model, so this needs no provider key and costs nothing. That makes it
+# right for a walkthrough and wrong for a real gate — in CI the prompt is the thing
+# under test, so `generate` is what you want, and eval.yaml uses it.
+#
+# Deterministic graders only, for the same reason. `accuracy` and the other judges
+# spend provider credits per item; these are string and JSON checks.
+name: demo-rescore
+
+target:
+  mode: rescore
+
+graders:
+  # Did the app refuse instead of answering? Catches the most common quiet
+  # regression in a support assistant.
+  - name: not_contains
+    config:
+      value: "I'm sorry"
+
+  # Is the answer a plausible length? Deliberately wide — a bound this loose only
+  # fires on something badly wrong, which is what you want from a gate.
+  #
+  # The keys are `min`/`max`/`unit`, and getting them wrong is worth doing once on
+  # purpose: `min_chars`/`max_chars` is refused at run creation with the grader
+  # named and the offending keys listed, rather than accepted and quietly scoring
+  # everything 1.0 on an empty config.
+  - name: length_bounds
+    config:
+      min: 20
+      max: 2000
+      unit: chars
