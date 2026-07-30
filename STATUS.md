@@ -38,6 +38,22 @@ paragraph into a project front page with screenshots in `docs/screenshots/`.
 `DEMO.md` is the five-minute path, every command of it executed. `make test` runs
 all five suites (**558 tests**), and `make lint` is clean.
 
+### Acceptance: fresh clone → compose up → full walkthrough, no manual fixes
+
+Run on a throwaway compose project with **empty volumes and images built from
+scratch**, so nothing carried over from this dev box:
+
+- `docker compose up -d --build --wait` → every container healthy, schema built
+  from nothing by the `migrate` service.
+- `seed` printed a key; `demo seed --n 10` produced traces through the built images.
+- The dashboard rendered and its `/api` proxy reached the API (the bug in item 3
+  below would have failed exactly here).
+- Thumbs-down → **failure inbox** → promote 8 → **inbox cleared**.
+- Two eval runs completed; `compare` returned **`inconclusive
+  (insufficient_data, n=8)`** — ADR-0008's refusal, demonstrated rather than
+  asserted.
+- `anvil eval run --min-score not_contains=0.8` exited **0**.
+
 ### Nine real bugs Phase 11 found, and how
 
 The pattern worth carrying forward: **every one came from running the thing in a
