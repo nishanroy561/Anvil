@@ -31,9 +31,17 @@ export function validateBatch(traces: unknown[]): void {
 
 export interface FakeServer {
   client: AnvilClient;
-  calls: { body: any; headers: Record<string, string> }[];
+  calls: { url: string; body: any; headers: Record<string, string> }[];
   /** Queue the responses each successive flush should get. */
   respond: (...responses: (Response | Error)[]) => void;
+  /**
+   * Script one endpoint independently. Phase 9 put two endpoints behind one
+   * flusher, and their failure modes have to be separable — an ingest 429 must
+   * not be able to stall feedback.
+   */
+  respondTo: (urlFragment: string, ...responses: (Response | Error)[]) => void;
+  /** Calls whose URL contains `urlFragment`. */
+  callsTo: (urlFragment: string) => FakeServer["calls"];
 }
 
 /**
@@ -43,13 +51,25 @@ export interface FakeServer {
 export function fakeServer(options: Partial<anvil.ClientOptions> = {}): FakeServer {
   const calls: FakeServer["calls"] = [];
   let scripted: (Response | Error)[] = [];
+  const perUrl = new Map<string, (Response | Error)[]>();
 
-  const fetchImpl = (async (_url: string, init: RequestInit) => {
+  const take = (queue: (Response | Error)[]): Response | Error =>
+    queue.length > 1 ? queue.shift()! : (queue[0] ?? new Response(null, { status: 202 }));
+
+  const fetchImpl = (async (url: string, init: RequestInit) => {
     calls.push({
+      url: String(url),
       body: JSON.parse(String(init.body)),
       headers: init.headers as Record<string, string>,
     });
-    const next = scripted.length > 1 ? scripted.shift()! : (scripted[0] ?? new Response(null, { status: 202 }));
+    let queue = scripted;
+    for (const [fragment, responses] of perUrl) {
+      if (String(url).includes(fragment)) {
+        queue = responses;
+        break;
+      }
+    }
+    const next = take(queue);
     if (next instanceof Error) throw next;
     return next.clone();
   }) as unknown as typeof fetch;
@@ -69,9 +89,17 @@ export function fakeServer(options: Partial<anvil.ClientOptions> = {}): FakeServ
     respond: (...responses) => {
       scripted = responses;
     },
+    respondTo: (urlFragment, ...responses) => {
+      perUrl.set(urlFragment, responses);
+    },
+    callsTo: (urlFragment) => calls.filter((c) => c.url.includes(urlFragment)),
   };
 }
 
 export function sentTraces(server: FakeServer): any[] {
-  return server.calls.flatMap((c) => c.body.traces);
+  return server.callsTo("/v1/ingest/traces").flatMap((c) => c.body.traces);
+}
+
+export function sentFeedback(server: FakeServer): any[] {
+  return server.callsTo("/v1/feedback").map((c) => c.body);
 }

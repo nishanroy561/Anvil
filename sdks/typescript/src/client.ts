@@ -23,6 +23,29 @@ export interface Stats {
   dropped: number;
   failedBatches: number;
   rejected: number;
+  /**
+   * Feedback keeps its own counters. The two have wildly different volumes —
+   * thousands of traces to a handful of thumbs-downs — so one shared `dropped`
+   * would let trace loss hide feedback loss completely.
+   */
+  feedbackQueued: number;
+  feedbackSent: number;
+  feedbackDropped: number;
+}
+
+export interface FeedbackInput {
+  traceId: string;
+  /** -1 thumbs-down, +1 thumbs-up. */
+  rating: -1 | 1;
+  comment?: string;
+  userRef?: string;
+}
+
+interface FeedbackPayload {
+  trace_id: string;
+  rating: number;
+  comment?: string;
+  user_ref?: string;
 }
 
 export interface ClientOptions {
@@ -44,9 +67,26 @@ export class AnvilClient {
   readonly flushInterval: number;
   readonly maxQueue: number;
   redact?: RedactHook;
-  readonly stats: Stats = { queued: 0, sent: 0, dropped: 0, failedBatches: 0, rejected: 0 };
+  readonly stats: Stats = {
+    queued: 0,
+    sent: 0,
+    dropped: 0,
+    failedBatches: 0,
+    rejected: 0,
+    feedbackQueued: 0,
+    feedbackSent: 0,
+    feedbackDropped: 0,
+  };
 
   private queue: Record<string, unknown>[] = [];
+  /**
+   * Feedback rides the same flush timer but keeps its own queue and backoff.
+   * Sharing the backoff would let a per-key *ingest* 429 — which says nothing
+   * about the feedback endpoint's own limit — stall a user's thumbs-down.
+   */
+  private feedbackQueue: FeedbackPayload[] = [];
+  private feedbackBackoffMs = 0;
+  private feedbackNextAttemptAt = 0;
   /**
    * Traces handed to an in-flight request. Counted as still queued: during an
    * outage a customer polling stats() must never see "0 queued" while their
@@ -74,7 +114,10 @@ export class AnvilClient {
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
     if (options.startWorker !== false) {
-      this.timer = setInterval(() => void this.flushOnce(), this.flushInterval);
+      this.timer = setInterval(() => {
+        void this.flushOnce();
+        void this.flushFeedbackOnce();
+      }, this.flushInterval);
       // Without unref(), a process whose work is done still waits on our timer.
       this.timer.unref?.();
       process.once("beforeExit", this.onExit);
@@ -97,6 +140,40 @@ export class AnvilClient {
       this.syncQueued();
     } catch {
       /* ADR-0013: losing a trace beats breaking the caller */
+    }
+  }
+
+  /**
+   * Attach an end-user thumbs up/down to a trace. Never throws.
+   *
+   * `traceId` is the id the SDK generated — round-trip it to your frontend
+   * (`trace.id`) and send it back with the vote. Pass `userRef` to make repeat
+   * votes an upsert, so one user toggling 👎 → 👍 replaces their row rather than
+   * adding a contradictory second one.
+   *
+   * Safe to call before the trace has reached Anvil: the server queues feedback
+   * and waits for the trace rather than rejecting the race.
+   */
+  feedback(input: FeedbackInput): void {
+    try {
+      if (input.rating !== -1 && input.rating !== 1) {
+        // A `0` would file feedback that no filter surfaces and no failure inbox
+        // shows, so it is refused rather than stored as "neutral".
+        console.warn(`anvil: feedback rating must be -1 or 1, got ${String(input.rating)}`);
+        this.stats.feedbackDropped += 1;
+        return;
+      }
+      const payload: FeedbackPayload = { trace_id: input.traceId, rating: input.rating };
+      if (input.comment !== undefined) payload.comment = input.comment;
+      if (input.userRef !== undefined) payload.user_ref = input.userRef;
+      this.feedbackQueue.push(payload);
+      while (this.feedbackQueue.length > this.maxQueue) {
+        this.feedbackQueue.shift();
+        this.stats.feedbackDropped += 1;
+      }
+      this.stats.feedbackQueued = this.feedbackQueue.length;
+    } catch {
+      /* ADR-0013: losing feedback beats breaking the caller */
     }
   }
 
@@ -176,6 +253,94 @@ export class AnvilClient {
     console.warn(`anvil: ingest rejected ${batch.length} traces with ${response.status}: ${detail}`);
   }
 
+  /**
+   * Drain up to `maxItems` feedback submissions. The endpoint takes one per
+   * request, so the cap is what keeps a feedback backlog from monopolising the
+   * flush timer that traces also depend on.
+   */
+  async flushFeedbackOnce(maxItems = 20): Promise<void> {
+    if (Date.now() < this.feedbackNextAttemptAt) return;
+    for (let i = 0; i < maxItems; i += 1) {
+      const item = this.feedbackQueue.shift();
+      if (item === undefined) {
+        this.feedbackBackoffMs = 0;
+        return;
+      }
+      this.stats.feedbackQueued = this.feedbackQueue.length;
+      if (!(await this.sendFeedback(item))) return;
+    }
+  }
+
+  /** Returns false if the caller should stop for this cycle. */
+  private async sendFeedback(item: FeedbackPayload): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeout);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/v1/feedback`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.apiKey}`,
+          "content-type": "application/json",
+          "user-agent": "anvil-sdk-js",
+        },
+        body: JSON.stringify(item),
+        signal: controller.signal,
+      });
+    } catch {
+      this.requeueFeedback(item);
+      this.bumpFeedbackBackoff();
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (response.status < 300) {
+      this.stats.feedbackSent += 1;
+      this.feedbackBackoffMs = 0;
+      this.feedbackNextAttemptAt = 0;
+      return true;
+    }
+
+    if (response.status === 429 || response.status >= 500) {
+      this.requeueFeedback(item);
+      this.bumpFeedbackBackoff(response.headers?.get?.("retry-after") ?? null);
+      return false;
+    }
+
+    // 400/401/404/422: the same submission will be refused forever.
+    this.stats.feedbackDropped += 1;
+    let detail = "";
+    try {
+      detail = (await response.text()).slice(0, 500);
+    } catch {
+      /* body already consumed or unreadable */
+    }
+    console.warn(`anvil: feedback rejected with ${response.status}: ${detail}`);
+    return true;
+  }
+
+  private requeueFeedback(item: FeedbackPayload): void {
+    // Back to the front: it is the oldest submission we hold.
+    this.feedbackQueue.unshift(item);
+    while (this.feedbackQueue.length > this.maxQueue) {
+      this.feedbackQueue.pop();
+      this.stats.feedbackDropped += 1;
+    }
+    this.stats.feedbackQueued = this.feedbackQueue.length;
+  }
+
+  private bumpFeedbackBackoff(retryAfter: string | null = null): void {
+    const parsed = retryAfter ? Number(retryAfter) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      this.feedbackBackoffMs = Math.min(parsed * 1000, BACKOFF_MAX_MS);
+    } else {
+      const next = this.feedbackBackoffMs <= 0 ? BACKOFF_BASE_MS : this.feedbackBackoffMs * 2;
+      this.feedbackBackoffMs = Math.min(BACKOFF_MAX_MS, next) * (0.5 + Math.random() * 0.5);
+    }
+    this.feedbackNextAttemptAt = Date.now() + this.feedbackBackoffMs;
+  }
+
   private syncQueued(): void {
     this.stats.queued = this.queue.length + this.inflightCount;
   }
@@ -214,15 +379,26 @@ export class AnvilClient {
   get backoff(): number {
     return this.backoffMs;
   }
+  get pendingFeedback(): FeedbackPayload[] {
+    return this.feedbackQueue;
+  }
+  get feedbackBackoff(): number {
+    return this.feedbackBackoffMs;
+  }
 
   // ---- lifecycle -------------------------------------------------------
 
-  /** Best-effort drain. */
+  /** Best-effort drain of traces *and* feedback. */
   async flush(maxBatches = 10): Promise<void> {
     this.nextAttemptAt = 0;
     for (let i = 0; i < maxBatches && this.queue.length > 0; i += 1) {
       await this.flushOnce();
       this.nextAttemptAt = 0;
+    }
+    this.feedbackNextAttemptAt = 0;
+    for (let i = 0; i < maxBatches && this.feedbackQueue.length > 0; i += 1) {
+      await this.flushFeedbackOnce();
+      this.feedbackNextAttemptAt = 0;
     }
   }
 
@@ -238,6 +414,7 @@ export class AnvilClient {
     process.removeListener?.("beforeExit", this.onExit);
     try {
       this.backoffMs = 0;
+      this.feedbackBackoffMs = 0;
       await this.flush(3);
     } catch {
       /* nothing useful to do on the way out */

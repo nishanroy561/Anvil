@@ -24,12 +24,12 @@
  * Node 18+; browser is out of scope for v1.
  */
 
-import { AnvilClient, type ClientOptions } from "./client.js";
+import { AnvilClient, type ClientOptions, type FeedbackInput } from "./client.js";
 
 export const VERSION = "0.1.0";
 
 export { AnvilClient } from "./client.js";
-export type { ClientOptions, Stats } from "./client.js";
+export type { ClientOptions, FeedbackInput, Stats } from "./client.js";
 export {
   currentSpan,
   currentTrace,
@@ -72,6 +72,24 @@ export function getClient(): AnvilClient | null {
 /** Point the module-level API at a specific client. Mainly for tests. */
 export function setClient(next: AnvilClient | null): void {
   client = next;
+}
+
+/**
+ * Attach an end-user thumbs up/down to a trace (-1 down, +1 up).
+ *
+ * Round-trip `trace.id` to your frontend and send it back with the vote:
+ *
+ *   const answer = await anvil.trace("ask", { input: q }, async (t) => { … });
+ *   res.json({ answer, traceId: t.id });
+ *
+ *   // later, when the user clicks 👎
+ *   anvil.feedback({ traceId, rating: -1, comment: "wrong date", userRef: user.id });
+ *
+ * Safe to call before the trace has reached Anvil — the server queues feedback
+ * and waits for the trace rather than rejecting the race.
+ */
+export function feedback(input: FeedbackInput): void {
+  client?.feedback(input);
 }
 
 /** Best-effort synchronous send of everything queued. */

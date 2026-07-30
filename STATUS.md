@@ -4,7 +4,101 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-28 (Phases 6, 7 and 8 complete)
+Last updated: 2026-07-30 (Phase 9 backend + acceptance; Phase 9 UI not built)
+
+## Phase 9 — feedback loop (2026-07-30). BACKEND DONE, acceptance passes. UI not started.
+
+- **`POST /v1/feedback`** (API-key auth) queues and returns **202**; it never
+  writes. That is not an optimization — **a thumbs-down routinely overtakes the
+  trace it points at**, because the click lands while the trace is still in the
+  Redis buffer. A synchronous insert would hit a foreign key and throw away the
+  most valuable signal a customer can send. The endpoint deliberately does *not*
+  check that the trace exists: answering 404 on a race would teach people to
+  sleep before every vote.
+- **`feedback_consumer.py`** owns the second half. Rows whose trace is missing go
+  into a Redis **sorted set** scored by next-attempt time (`feedback:deferred`),
+  not left pending on the stream — a stream has no "not before time T", so
+  redelivery timing would be `reclaim_idle_ms`, `max_deliveries` would
+  dead-letter a *healthy* row after 5 tries, and every undue entry would be
+  re-read on every pass. Backoff is **derived from the row's own age** rather
+  than an attempt counter, which keeps the member byte-identical so ZADD updates
+  it in place instead of adding one entry per attempt. Past
+  `FEEDBACK_RETRY_WINDOW_S` (10 min) it is dead-lettered — the trace is not
+  coming. `FEEDBACK_DEFERRED_MAX` caps the set, because feedback naming trace
+  ids that will never exist is the abuse shape here.
+- **Ordering inside the consumer is load-bearing twice.** `defer()` runs *before*
+  the stream ack (a crash replays an idempotent batch instead of losing the
+  deferred rows), and in `process_deferred` the ZADD runs before the ZREM sweep,
+  with `defer()` **returning which members it actually rescheduled**. Without
+  that return value an expired row keeps its stale past-due score, gets pulled
+  every cycle, and is dead-lettered forever — there is a regression test pinning
+  exactly this.
+- **Two conflict targets, two INSERTs.** Identified feedback upserts on
+  `(trace_id, user_ref)` via the partial unique index, so toggling 👎 → 👍 leaves
+  one row. Anonymous feedback has no such key, so it falls back to
+  `ON CONFLICT (id) DO NOTHING` — **which is why the API mints the row id and
+  echoes it in the 202**; without it a redelivered anonymous submission inserts a
+  second row. In-batch duplicates are collapsed first (Postgres refuses to let
+  one `ON CONFLICT DO UPDATE` touch a row twice, and a batch legitimately carries
+  a user's 👎 then their 👍).
+- **Reclaim, same as the ingest consumer.** Since the ack happens after the
+  writes commit, a worker killed mid-batch leaves entries pending — and with no
+  reclaim they would sit there with nobody to read them. That was the one
+  *accidental* loss path left (everything else this consumer drops, it drops on
+  purpose); `reclaim_pending()` runs at startup and every `reclaim_interval_s`,
+  dead-lettering anything past `max_deliveries` before reprocessing it.
+- **Tenant check at persist**, not at submit: the trace must belong to the
+  submitting key's project. Mismatches are dropped and counted, never deferred —
+  waiting changes nothing about who owns the trace. The 202 at the edge is
+  deliberate; telling a caller whose trace an id is would be an enumeration
+  oracle.
+- Read side: `?feedback=negative|positive|any|none` on the trace list (correlated
+  EXISTS, **not** a join — a trace with three downvotes must appear once, or the
+  keyset page size silently breaks), per-row thumbs counts from a second query
+  over just that page's ids, `feedback_events` with comments on the trace detail,
+  and **`GET /v1/projects/{id}/failure-inbox`** — negative feedback whose trace is
+  in no dataset (`NOT EXISTS` over `dataset_items.source_trace_id`), grouped by
+  trace. Promotion is what drains it; that is the difference between an inbox and
+  a list.
+- SDKs: `client.feedback(trace_id, rating, comment=, user_ref=)` in Python and
+  `client.feedback({traceId, rating, comment, userRef})` in TS, plus module-level
+  helpers. **Own queue, own backoff, own counters** — a per-key *ingest* 429 says
+  nothing about the feedback endpoint's limit, and one shared `dropped` number
+  would let trace loss (thousands) hide feedback loss (a handful). `rating` is a
+  two-value literal everywhere: a `0` would file feedback no filter surfaces and
+  no inbox shows.
+- Demo app gained `POST /feedback` (one SDK call, then `anvil.flush()` so a demo
+  click shows up now rather than eventually). **The thumbs-down *button* is UI and
+  is not built** — see below.
+- **Acceptance: `python scripts/feedback_acceptance.py` → PASSED**, 34 checks.
+  API live over real HTTP; consumers driven a cycle at a time in-process, same
+  rationale as Phase 8 (the deferred clock is the mechanism, so sleeping through
+  a real backoff adds flakiness, not strength). The order of the first two steps
+  is the point: vote → 202 → deferred, **zero rows** → trace ingested and
+  persisted → deferred vote lands **exactly once** → inbox → filter → detail →
+  toggle 👎/👍/👎 staying one row → another tenant's vote accepted at the edge and
+  never written → promote clears the inbox → rescore run scores the promoted item
+  `0.0` on `not_contains`. No provider credits spent.
+- **Test counts: API 174 (+18), worker 178 (+22), Python SDK 76 (+16), TS SDK 39
+  (+15), demo 8 (+2).** All green; `npx tsc --noEmit` clean in the TS SDK.
+
+**A trap worth knowing (cost a debugging cycle):** `anvil.init()` calls
+`shutdown()` on whatever client was already installed, and shutdown **closes the
+httpx transport**. A test that installs a collector *before* entering
+`TestClient(app)` gets it replaced by the app's lifespan `init()`, and setting it
+back afterwards hands you a client that queues happily and can never send — which
+looks exactly like a broken endpoint. Build the client *after* the lifespan has
+run. The pre-existing demo tests never hit this because they only ever inspect
+`_queue` and never actually flush.
+
+### Phase 9 UI — specified, not built (needs the go-ahead)
+
+Backend for all of it is in place and tested. Outstanding per
+[evaluation §7](plan/evaluation.md): feedback badge + comments on the trace
+header, a `feedback=` control in the traces filter bar, bulk-select negatives →
+"Add to dataset" (the existing `AddToDataset` popover already takes many trace
+ids), a `/p/[id]/inbox` failure-inbox page, and an actual 👎 button in the demo
+app (it currently has the endpoint only).
 
 ## Phase 8 — monitors & alerts (2026-07-28). DONE, acceptance passes.
 
@@ -208,7 +302,10 @@ See "Phase 5 gaps" #1.** User gave the Phase 5 UI go-ahead.
 **Phase 6 (comparison & stats): DONE** — acceptance passes.
 **Phase 7 (CI gating): DONE** — acceptance passes.
 **Phase 8 (monitors & alerts): DONE** — acceptance passes.
-Phases 9–11: not started (stubs with spec pointers exist).
+**Phase 9 (feedback loop): BACKEND DONE** — acceptance passes. The UI half
+(inbox page, badge, filter control, demo 👎 button) is specified above and awaits
+a go-ahead.
+Phases 10–11: not started (stubs with spec pointers exist).
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
@@ -422,8 +519,10 @@ API-death scenarios.
   and the 100-span no-jank check need a human at :3000 (no browser tooling in
   the build session). `npm run build` is clean.
 - Phase-4 leftovers: "Add to dataset" button is a disabled stub (Phase 5 wires
-  it); feedback column shows "—" until Phase 9; `/v1/ingest/stats` has no
-  session-authed variant so the dashboard doesn't surface ingest stats.
+  it); the feedback column still shows "—" — the API now serves per-row counts
+  (`TraceSummary.feedback`), so wiring it is part of the outstanding Phase 9 UI;
+  `/v1/ingest/stats` has no session-authed variant so the dashboard doesn't
+  surface ingest stats.
 
 ### Phase 5 — backend built and verified (2026-07-21)
 
@@ -695,7 +794,8 @@ API-death scenarios.
   `search_text`), `tables.py` (Core table declarations — ADR-0014), `registry.py`
   (pricing resolver registry with the cloud-mode built-ins-only rule),
   `config.py`, `db.py`, `metrics.py` (:9101). `eval_runner`, `sampler`,
-  `alerter`, `retention` remain spec-docstring stubs.
+  `feedback_consumer.py` (Phase 9 — deferred-retry sorted set, upsert, tenant
+  guard at persist); only `retention` remains a spec-docstring stub.
   `pricing.py` is **partly verified**: Anthropic entries were checked against the
   published list on 2026-07-21 and Google's were added under ADR-0016, but the
   two OpenAI entries are still marked `# placeholders — verify` in the file.
@@ -716,7 +816,8 @@ API-death scenarios.
   (`demo/kb.py`) + mock-by-default LangChain model (`demo/chain.py`) + seeder
   (`demo/seed.py`) + CLI (`demo/__main__.py`). `DEMO_LLM=real` swaps in a live
   provider. Seeded models are all in the worker's price table so cost is
-  non-null. Phase 8 adds `--drift` here; Phase 9 adds thumbs-down.
+  non-null. Phase 8 added `--drift`; Phase 9 added `POST /feedback` (the button
+  itself is UI and still outstanding).
 - `examples/ci-gate`, `examples/plugin-example`, `sdks/` docs beyond the above:
   stubs with spec pointers only.
 
@@ -725,10 +826,9 @@ API-death scenarios.
 1. **Finish Phase 4 acceptance**: have the user eyeball :3000 — waterfall
    proportions/nesting on a demo trace, the 103-span `acceptance_100_spans`
    trace for jank. Worth a look at `/evals/compare` while there.
-2. **Phase 9 — feedback loop** (plan/evaluation.md §7): the `ingest:feedback`
-   stream is declared in both `streams.py` files with no consumer, and
-   `client.feedback()` is missing from both SDKs. Also needs the failure inbox
-   and a thumbs-down button in the demo app.
+2. **Phase 9 UI** — the backend and acceptance are done; the inbox page, trace
+   badge, `feedback=` filter control and the demo's 👎 button are not. Needs a
+   go-ahead (see the Phase 9 section at the top).
 3. Then 10 (retention) and 11 (hardening) per plan.md's phase table.
 
 **Backfill worth doing at some point:** items promoted before ADR-0018 have no
@@ -737,10 +837,10 @@ API-death scenarios.
 
 ### Phase 3 leftovers worth knowing
 
-- **`client.feedback()` is not implemented** in either SDK — it belongs to
-  Phase 9 (evaluation.md §7), which owns the endpoint it would call. The pieces
-  it needs are already in place: `trace.id` is a client-generated UUID exposed
-  on the object and returned by the demo app's `/ask` response.
+- ~~**`client.feedback()` is not implemented** in either SDK~~ — **built in
+  Phase 9** in both, alongside `POST /v1/feedback`. `trace.id` was already the
+  piece it needed: a client-generated UUID exposed on the object and returned by
+  the demo app's `/ask` response.
 - ~~The eval CLI is not in the Python SDK yet~~ — **built in Phase 7**;
   `anvil_sdk/cli.py`, entry point `anvil`, extras `[cli]` for PyYAML.
 - The TS SDK's tests inject a scripted `fetchImpl` rather than using **msw**,
@@ -789,3 +889,9 @@ in the Phase-4 session. All are dev-only — revoke rather than reuse.
 The demo project now holds **40 traces**: the 39 from Phase 3 plus the
 103-span `acceptance_100_spans` trace (nested chains, one error span, one
 open-ended span) ingested for the Phase-4 waterfall check.
+
+Each acceptance script from Phases 6–9 signs up or seeds its own throwaway
+tenant, so the dev DB also carries several `Phase 9 …` / `Drift Acceptance`-style
+orgs with one trace, one feedback row, one dataset and one eval run apiece. They
+are isolated from the demo project by construction (that is why the scripts
+create them) and are safe to leave or delete.

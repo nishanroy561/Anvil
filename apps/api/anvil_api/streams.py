@@ -15,6 +15,9 @@ EVAL_JOBS_STREAM = "eval:jobs"
 
 PERSISTERS_GROUP = "persisters"
 EVAL_RUNNERS_GROUP = "eval-runners"
+# Feedback gets its own group (Phase 9): its consumer defers rows whose trace
+# hasn't landed yet, and that retry behaviour must not hold up trace persistence.
+FEEDBACK_GROUP = "feedback-persisters"
 
 # Redis hash of ingest counters, exposed at /v1/ingest/stats so a throttled
 # customer is diagnosable (plan/ingestion.md §2).

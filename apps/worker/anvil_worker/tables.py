@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     Numeric,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -121,6 +122,18 @@ spans = Table(
     Column("error", Text),
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("ended_at", DateTime(timezone=True)),
+)
+
+feedback = Table(
+    "feedback",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("project_id", Uuid, nullable=False),
+    Column("trace_id", Uuid, nullable=False),
+    Column("rating", SmallInteger, nullable=False),
+    Column("comment", Text),
+    Column("user_ref", String(256)),
+    Column("created_at", DateTime(timezone=True)),
 )
 
 # ---- Phase 8: monitors & alerts ---------------------------------------------

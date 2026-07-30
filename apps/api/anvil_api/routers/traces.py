@@ -23,8 +23,9 @@ from ..auth import current_user
 from ..config import get_settings
 from ..db import get_session
 from ..deps import NOT_FOUND, owned_project
-from ..models import Span, Trace, User
+from ..models import Feedback, Span, Trace, User
 from ..schemas.traces import (
+    FeedbackCounts,
     MetricsOverview,
     TimeBucket,
     TraceDetail,
@@ -53,6 +54,47 @@ def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
         )
 
 
+def _feedback_exists(negative: bool | None = None):
+    """Correlated EXISTS against the page's traces.
+
+    A subquery rather than a join: a trace with three downvotes must appear once
+    in the list, and joining would multiply the row and quietly break the keyset
+    page size.
+    """
+    clauses = [Feedback.trace_id == Trace.id]
+    if negative is True:
+        clauses.append(Feedback.rating < 0)
+    elif negative is False:
+        clauses.append(Feedback.rating > 0)
+    return select(Feedback.id).where(*clauses).exists()
+
+
+async def feedback_counts(
+    session: AsyncSession, trace_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, FeedbackCounts]:
+    """Thumbs tally for the rows on this page only.
+
+    A second query over ~50 ids, not a join or a correlated subquery in the main
+    SELECT: the trace list is the hottest read in the product and its keyset plan
+    is the thing not to disturb.
+    """
+    if not trace_ids:
+        return {}
+    rows = await session.execute(
+        select(
+            Feedback.trace_id,
+            func.count().filter(Feedback.rating < 0).label("negative"),
+            func.count().filter(Feedback.rating > 0).label("positive"),
+        )
+        .where(Feedback.trace_id.in_(trace_ids))
+        .group_by(Feedback.trace_id)
+    )
+    return {
+        row.trace_id: FeedbackCounts(negative=row.negative, positive=row.positive)
+        for row in rows
+    }
+
+
 def _metadata_filters(request: Request) -> list:
     """`?metadata.user_tier=pro` → a JSONB containment match.
 
@@ -74,6 +116,11 @@ async def list_traces(
     status: str | None = None,
     name: str | None = None,
     model: str | None = None,
+    feedback: str | None = Query(
+        None,
+        pattern="^(negative|positive|any|none)$",
+        description="Filter by end-user feedback attached to the trace",
+    ),
     since: datetime | None = None,
     until: datetime | None = None,
     limit: int = Query(50, ge=1),
@@ -117,6 +164,14 @@ async def list_traces(
         filters.append(Trace.name == name)
     if model is not None:
         filters.append(Trace.model == model)
+    if feedback == "negative":
+        filters.append(_feedback_exists(negative=True))
+    elif feedback == "positive":
+        filters.append(_feedback_exists(negative=False))
+    elif feedback == "any":
+        filters.append(_feedback_exists())
+    elif feedback == "none":
+        filters.append(~_feedback_exists())
     filters.extend(_metadata_filters(request))
 
     if cursor is not None:
@@ -139,13 +194,14 @@ async def list_traces(
         traces = traces[:limit]
         next_cursor = _encode_cursor(traces[-1].started_at, traces[-1].id)
 
+    counts = await feedback_counts(session, [t.id for t in traces])
     return TraceListPage(
-        items=[_summary(t) for t in traces],
+        items=[_summary(t, counts.get(t.id)) for t in traces],
         next_cursor=next_cursor,
     )
 
 
-def _summary(trace: Trace) -> TraceSummary:
+def _summary(trace: Trace, counts: FeedbackCounts | None = None) -> TraceSummary:
     return TraceSummary(
         id=trace.id,
         project_id=trace.project_id,
@@ -161,7 +217,14 @@ def _summary(trace: Trace) -> TraceSummary:
         metadata=trace.meta,
         started_at=trace.started_at,
         ended_at=trace.ended_at,
+        feedback=counts or FeedbackCounts(),
     )
+
+
+def summary_with_feedback(trace: Trace, negative: int, positive: int) -> TraceSummary:
+    """Public shim so other routers (the failure inbox) can build a list row
+    without reaching for a private helper or duplicating the field mapping."""
+    return _summary(trace, FeedbackCounts(negative=negative, positive=positive))
 
 
 @router.get("/traces/{trace_id}", response_model=TraceDetail)
@@ -179,10 +242,34 @@ async def get_trace(
     rows = await session.execute(
         select(Span).where(Span.trace_id == trace.id).order_by(Span.started_at, Span.id)
     )
-    detail = _summary(trace).model_dump()
+    events = list(
+        (
+            await session.execute(
+                select(Feedback)
+                .where(Feedback.trace_id == trace.id)
+                .order_by(Feedback.created_at.desc())
+            )
+        ).scalars()
+    )
+    counts = FeedbackCounts(
+        negative=sum(1 for e in events if e.rating < 0),
+        positive=sum(1 for e in events if e.rating > 0),
+    )
+    detail = _summary(trace, counts).model_dump()
     detail["input"] = trace.input
     detail["output"] = trace.output
     detail["spans"] = list(rows.scalars())
+    detail["feedback_events"] = [
+        {
+            "id": e.id,
+            "trace_id": e.trace_id,
+            "rating": e.rating,
+            "comment": e.comment,
+            "user_ref": e.user_ref,
+            "created_at": e.created_at,
+        }
+        for e in events
+    ]
     return TraceDetail.model_validate(detail)
 
 

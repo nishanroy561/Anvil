@@ -25,6 +25,18 @@ class SpanOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FeedbackCounts(BaseModel):
+    """Per-trace thumbs tally for a list row (Phase 9).
+
+    Counts only — comments live on the detail response. A list of 200 rows each
+    carrying free-text comments would put unbounded user input in the hot path
+    for a column that renders as a badge.
+    """
+
+    negative: int = 0
+    positive: int = 0
+
+
 class TraceSummary(BaseModel):
     """List-row shape: no payloads. Trace input/output are unbounded JSONB and
     would dominate the response; the detail endpoint serves them."""
@@ -43,6 +55,7 @@ class TraceSummary(BaseModel):
     metadata: dict | None
     started_at: datetime
     ended_at: datetime | None
+    feedback: FeedbackCounts = FeedbackCounts()
 
     model_config = {"from_attributes": True}
 
@@ -59,6 +72,11 @@ class TraceDetail(TraceSummary):
     # assembled client-side: the waterfall must tolerate orphans anyway
     # (checklist row 7), so the server never fabricates a root to hang them on.
     spans: list[SpanOut]
+    # The entries behind `feedback`'s counts, comments included — the trace
+    # header shows what the user actually said, not just that they voted.
+    # Typed loosely to keep this module free of a schemas/feedback.py import,
+    # which would close a cycle (that module needs TraceSummary from here).
+    feedback_events: list[dict] = []
 
 
 class TimeBucket(BaseModel):

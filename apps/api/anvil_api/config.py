@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     max_eval_items: int = 500
     max_concurrent_runs: int = 3
 
+    # Feedback (Phase 9). Reachable from a customer's own end users, which makes
+    # it the most abuse-exposed surface after ingest (checklist row 19).
+    feedback_rate_limit_pm: int = 600
+    feedback_max_comment_chars: int = 4_000
+    feedback_stream_maxlen: int = 100_000
+    failure_inbox_page_size_max: int = 200
+
     admin_api_key: str = ""
 
 

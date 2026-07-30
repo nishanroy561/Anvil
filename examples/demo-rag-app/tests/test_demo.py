@@ -4,6 +4,8 @@ Anvil does not break the host app (plan/sdk.md §3).
 Keyless: the LLM is the mock chat model from `demo.chain` (CLAUDE.md).
 """
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -125,6 +127,64 @@ def test_anvil_dying_mid_run_does_not_break_the_app():
         assert len(instance._queue) <= 1000, "and stayed bounded"
     finally:
         anvil.set_client(None)
+
+
+# ---- thumbs-down (Phase 9) ----------------------------------------------
+
+
+def test_thumbs_down_posts_the_returned_trace_id():
+    """The round trip the whole feedback loop rests on: `/ask` hands back a trace
+    id, and the vote comes back carrying it."""
+    # Assertions stay *inside* the respx block — it clears `.calls` on exit.
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post("https://anvil.test/v1/feedback").mock(
+            return_value=httpx.Response(202, json={"id": "queued"})
+        )
+        mock.post(INGEST).mock(return_value=httpx.Response(202, json={"accepted": 1}))
+        with TestClient(app) as client:
+            # Built *after* the app's lifespan ran `init()`, which shuts down
+            # whichever client was installed — and shutdown closes its httpx
+            # transport. A collector created beforehand can still queue but can
+            # never send, which looks exactly like a broken endpoint.
+            sdk = AnvilClient(
+                api_key="ak_test", base_url="https://anvil.test", start_worker=False
+            )
+            anvil.set_client(sdk)
+            asked = client.post("/ask", json={"question": "How long do refunds take?"})
+            trace_id = asked.json()["trace_id"]
+
+            voted = client.post(
+                "/feedback",
+                json={
+                    "trace_id": trace_id,
+                    "rating": -1,
+                    "comment": "wrong, it took three weeks",
+                    "user_ref": "user-9",
+                },
+            )
+
+        assert voted.status_code == 200
+        assert voted.json() == {"ok": True, "trace_id": trace_id, "rating": -1}
+        assert route.call_count == 1
+        assert json.loads(route.calls[0].request.read()) == {
+            "trace_id": trace_id,
+            "rating": -1,
+            "comment": "wrong, it took three weeks",
+            "user_ref": "user-9",
+        }
+    anvil.set_client(None)
+
+
+def test_thumbs_down_does_not_break_when_anvil_is_unreachable():
+    """A demo whose 👎 button 500s when Anvil is down would be advertising the
+    opposite of ADR-0013."""
+    with TestClient(app) as client:
+        anvil.init(api_key="ak_x", base_url="http://127.0.0.1:9", flush_interval=0.05)
+        response = client.post(
+            "/feedback", json={"trace_id": "not-even-a-real-trace", "rating": -1}
+        )
+        assert response.status_code == 200
+    anvil.shutdown()
 
 
 def test_redact_hook_masks_emails_before_the_wire(collector):

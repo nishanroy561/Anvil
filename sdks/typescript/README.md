@@ -41,12 +41,53 @@ misconfigured: the queue sheds its *oldest* entries, counts them in
 | `span(name, options?, fn)` | Nests via `AsyncLocalStorage`, so it survives `await` |
 | `observe(fn, { type })` | Wrapper sugar — args in, resolved value out |
 | `startTrace(name)` / `startSpan(trace, name)` | Manual API; call `.end({ output })` |
+| `feedback({ traceId, rating, comment?, userRef? })` | End-user thumbs up/down (`-1` / `1`) |
 | `flush()` / `shutdown()` / `stats()` | Lifecycle and counters |
 
 `trace.id` is a client-generated UUID — hand it to your frontend so feedback can
 be attached to that exact trace later.
 
 Span types: `llm`, `retrieval`, `tool`, `embedding`, `chain`, `custom`.
+
+## feedback — closing the loop
+
+Round-trip `trace.id` to your frontend, then send the vote back with it:
+
+```ts
+app.post("/ask", async (req, res) => {
+  const t = anvil.startTrace("ask");
+  const answer = await answerQuestion(req.body.question);
+  t.end({ output: answer });
+  res.json({ answer, traceId: t.id });
+});
+
+app.post("/feedback", (req, res) => {
+  anvil.feedback({
+    traceId: req.body.traceId,
+    rating: -1,
+    comment: req.body.comment,
+    userRef: req.user.id,
+  });
+  res.json({ ok: true });
+});
+```
+
+Two things worth knowing:
+
+- **Call it as soon as the user clicks.** The vote routinely beats its own trace
+  to Anvil's database; the server holds it and waits for the trace rather than
+  rejecting the race. You never need to await anything first.
+- **Pass `userRef` if you have one.** With it, repeat votes upsert — one user
+  toggling 👎 → 👍 replaces their row instead of leaving two contradictory ones.
+  Without it, every call is an independent anonymous vote.
+
+Fire-and-forget like everything else here: `feedback()` never throws, and its own
+counters (`feedbackQueued`/`feedbackSent`/`feedbackDropped`) are separate from the
+trace ones so a busy trace queue can't hide a lost vote.
+
+Downvoted traces show up in the dashboard's **failure inbox** — thumbs-down
+traces not yet in any dataset — where one click turns a real failure into a test
+case.
 
 ## redact — scrub PII before it leaves your process
 

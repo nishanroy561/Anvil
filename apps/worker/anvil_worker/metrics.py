@@ -38,6 +38,22 @@ ABANDONED_TRACES = Counter(
 EVAL_ITEMS = Counter("anvil_eval_items_total", "Dataset items scored")
 EVAL_RUNS = Counter("anvil_eval_runs_total", "Eval runs reaching a terminal state", ["status"])
 
+# ---- Phase 9: feedback loop --------------------------------------------------
+
+FEEDBACK_PERSISTED = Counter(
+    "anvil_feedback_persisted_total", "Feedback rows written to Postgres"
+)
+FEEDBACK_DEFERRED = Counter(
+    "anvil_feedback_deferred_total",
+    "Feedback rows held back because their trace had not landed yet",
+)
+FEEDBACK_DROPPED = Counter(
+    "anvil_feedback_dropped_total", "Feedback rows discarded", ["cause"]
+)
+FEEDBACK_DEFERRED_DEPTH = Gauge(
+    "anvil_feedback_deferred_depth", "Feedback rows currently waiting for a trace"
+)
+
 # ---- Phase 8: monitors & alerts ---------------------------------------------
 
 MONITOR_SAMPLES = Counter(

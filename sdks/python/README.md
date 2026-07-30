@@ -44,12 +44,47 @@ this package raises into your code except exceptions your own functions raised.
 | `span(name, type=…, input=…)` | Context manager; nests via `contextvars` |
 | `@observe(type="llm")` | Decorator sugar — args in, return value out, exceptions marked |
 | `start_trace(...)` / `start_span(...)` | Manual API for middleware and callbacks; call `.end(output=…)` |
+| `feedback(trace_id, rating, comment=None, user_ref=None)` | End-user thumbs up/down (`-1` / `+1`) |
 | `flush()` / `shutdown()` / `stats()` | Lifecycle and counters |
 
 `trace.id` is a client-generated UUID exposed on the object — hand it to your
 frontend so a thumbs-down can be attached to that exact trace later.
 
 Span types: `llm`, `retrieval`, `tool`, `embedding`, `chain`, `custom`.
+
+## feedback — closing the loop
+
+Round-trip `trace.id` to your frontend, then send the vote back with it:
+
+```python
+@app.post("/ask")
+def ask(body: AskRequest):
+    handler = AnvilCallbackHandler(trace_name="ask")
+    answer = chain.invoke(body.question, config={"callbacks": [handler]})
+    return {"answer": answer, "trace_id": handler.trace.id}
+
+@app.post("/feedback")
+def feedback(body: FeedbackRequest):
+    anvil.feedback(body.trace_id, -1, comment=body.comment, user_ref=body.user_id)
+    return {"ok": True}
+```
+
+Two things worth knowing:
+
+- **Call it as soon as the user clicks.** The vote routinely beats its own trace
+  to Anvil's database; the server holds it and waits for the trace rather than
+  rejecting the race. You never need to sleep first.
+- **Pass `user_ref` if you have one.** With it, repeat votes upsert — one user
+  toggling 👎 → 👍 replaces their row instead of leaving two contradictory ones.
+  Without it, every call is an independent anonymous vote.
+
+Fire-and-forget like everything else here: `feedback()` never blocks or raises,
+and its own counters (`feedback_queued`/`feedback_sent`/`feedback_dropped`) are
+separate from the trace ones so a busy trace queue can't hide a lost vote.
+
+Downvoted traces show up in the dashboard's **failure inbox** — thumbs-down
+traces not yet in any dataset — where one click turns a real failure into a test
+case.
 
 ## redact — scrub PII before it leaves your process
 

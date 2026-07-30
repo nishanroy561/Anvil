@@ -81,9 +81,38 @@ def ask(request: AskRequest) -> dict:
         metadata={"source": "demo-api"},
     )
     result = chain.invoke(request.question, config={"callbacks": [handler]})
-    # The trace id goes back to the caller so a frontend can attach feedback to
-    # it later (plan/sdk.md §1; the feedback endpoint arrives in Phase 9).
+    # The trace id goes back to the caller so the frontend can attach feedback to
+    # it later — see /feedback below (plan/sdk.md §1).
     return {**result, "trace_id": handler.trace.id if handler.trace else None}
+
+
+class FeedbackRequest(BaseModel):
+    trace_id: str
+    # -1 thumbs-down, +1 thumbs-up.
+    rating: int
+    comment: str | None = None
+    user_ref: str | None = None
+
+
+@app.post("/feedback")
+def feedback(request: FeedbackRequest) -> dict:
+    """What a thumbs-down button posts to.
+
+    One SDK call, and note what is *not* here: no wait for the trace to have
+    persisted. The click typically lands while the trace is still in Anvil's
+    buffer, and the platform is built to absorb that (plan/evaluation.md §7) —
+    so a demo that slept first would be demonstrating the wrong thing.
+    """
+    anvil.feedback(
+        request.trace_id,
+        request.rating,
+        comment=request.comment,
+        user_ref=request.user_ref,
+    )
+    # The SDK is fire-and-forget on a 2 s timer; a demo click should show up in
+    # the dashboard now, not eventually.
+    anvil.flush()
+    return {"ok": True, "trace_id": request.trace_id, "rating": request.rating}
 
 
 @app.get("/healthz")

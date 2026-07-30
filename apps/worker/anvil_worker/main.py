@@ -1,7 +1,8 @@
-"""Worker entrypoint: runs the ingest consumer and the stale-trace reaper as
-concurrent tasks (plan/ingestion.md §3).
+"""Worker entrypoint: every background loop runs as a concurrent task here —
+ingest consumer, stale-trace reaper, feedback consumer, eval runner, monitor
+sampler and alerter (plan/ingestion.md §3, plan/evaluation.md §3/§6/§7).
 
-Later phases add eval_runner, sampler, alerter, and retention alongside these.
+Phase 10 adds retention alongside these.
 """
 
 import asyncio
@@ -16,6 +17,7 @@ from .alerter import Alerter
 from .channels import load_channels
 from .config import get_settings
 from .eval_runner import EvalRunner
+from .feedback_consumer import FeedbackConsumer
 from .graders import load_graders
 from .ingest_consumer import IngestConsumer, run_reaper
 from .providers import load_env
@@ -37,6 +39,7 @@ async def main() -> None:
 
     client = redis.from_url(settings.redis_url, decode_responses=True)
     consumer = IngestConsumer(client)
+    feedback = FeedbackConsumer(client)
     evals = EvalRunner(client)
     sampler = Sampler()
     alerter = Alerter()
@@ -44,6 +47,7 @@ async def main() -> None:
     tasks = [
         asyncio.create_task(consumer.run()),
         asyncio.create_task(run_reaper()),
+        asyncio.create_task(feedback.run()),
         asyncio.create_task(evals.run()),
         asyncio.create_task(sampler.run()),
         asyncio.create_task(alerter.run()),
@@ -54,6 +58,7 @@ async def main() -> None:
         # clean shutdown leaves nothing pending for reclaim to mop up.
         log.info("shutdown signal received; draining")
         consumer.stop()
+        feedback.stop()
         evals.stop()
         sampler.stop()
         alerter.stop()

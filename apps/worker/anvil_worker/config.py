@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     eval_stale_run_s: int = 120
     eval_reclaim_interval_s: int = 60
 
+    # Feedback consumer (Phase 9, plan/evaluation.md §7). A thumbs-down can
+    # overtake the trace it points at, so rows whose trace is missing are
+    # deferred and retried; after the window they are dead-lettered rather than
+    # retried forever (checklist row 12).
+    feedback_batch_size: int = 200
+    feedback_retry_window_s: int = 600
+    feedback_retry_max_delay_s: int = 30
+    # Ceiling on the deferred set. Feedback naming trace ids that will never
+    # exist is the abuse shape here, and an unbounded retry set would let it
+    # grow until Redis is the outage.
+    feedback_deferred_max: int = 50_000
+
     metrics_port: int = 9101
 
 

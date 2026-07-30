@@ -20,3 +20,13 @@ RATELIMIT_REJECTIONS = Counter(
 )
 STREAM_DEPTH = Gauge("anvil_stream_depth", "XLEN of ingest:traces")
 DLQ_DEPTH = Gauge("anvil_dlq_depth", "XLEN of ingest:dlq")
+
+# Feedback (Phase 9). Accepted here means "queued", not "persisted" — the worker
+# owns the second half and counts it separately, because feedback can arrive
+# before the trace it points at (checklist row 12).
+FEEDBACK_ACCEPTED = Counter(
+    "anvil_feedback_accepted_total", "Feedback submissions queued", ["project"]
+)
+FEEDBACK_REJECTED = Counter(
+    "anvil_feedback_rejected_total", "Feedback submissions rejected", ["cause"]
+)

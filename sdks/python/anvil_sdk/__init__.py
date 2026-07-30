@@ -49,6 +49,7 @@ __all__ = [
     "start_span",
     "current_trace",
     "current_span",
+    "feedback",
     "flush",
     "shutdown",
     "stats",
@@ -109,6 +110,29 @@ def set_client(client: Optional[AnvilClient]) -> None:
     """Point the module-level API at a specific client. Mainly for tests."""
     global _client
     _client = client
+
+
+def feedback(
+    trace_id: str,
+    rating: int,
+    comment: Optional[str] = None,
+    user_ref: Optional[str] = None,
+) -> None:
+    """Attach an end-user thumbs up/down to a trace (-1 down, +1 up).
+
+    Round-trip `trace.id` to your frontend and send it back with the vote:
+
+        result = chain.invoke(question, config={"callbacks": [handler]})
+        return {"answer": result, "trace_id": handler.trace.id}
+
+        # later, when the user clicks 👎
+        anvil.feedback(trace_id, -1, comment="wrong date", user_ref=user.id)
+
+    Safe to call before the trace has reached Anvil — the server queues feedback
+    and waits for the trace rather than rejecting the race.
+    """
+    if _client is not None:
+        _client.feedback(trace_id, rating, comment=comment, user_ref=user_ref)
 
 
 def flush() -> None:
