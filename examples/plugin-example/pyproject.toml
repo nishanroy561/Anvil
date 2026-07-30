@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anvil-plugin-example"
+version = "0.1.0"
+description = "Example Anvil plugin: one grader and one alert channel"
+requires-python = ">=3.11"
+# Deliberately no dependencies. A plugin gets its HTTP client and its LLM from
+# Anvil (`httpx` is already in the worker image; judges get a configured model
+# through `context.model_factory`), so pinning either here is how a plugin ends
+# up fighting the host over versions.
+dependencies = []
+
+# The two entry-point groups the worker discovers at startup. The key is the
+# plugin's registered name; the value points at a zero-argument callable that
+# returns the instance — the worker calls `entry_point.load()()`.
+[project.entry-points."anvil.graders"]
+word_count_bounds = "anvil_plugin_example.grader:WordCountBounds"
+
+[project.entry-points."anvil.alert_channels"]
+slack = "anvil_plugin_example.channel:SlackChannel"
+
+[tool.setuptools]
+packages = ["anvil_plugin_example"]

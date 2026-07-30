@@ -117,6 +117,14 @@ def registered_names() -> list[str]:
     return sorted(_channels)
 
 
+def get_channel(name: str) -> AlertChannel | None:
+    """Mirrors `graders.get_grader`. Both registries lazily load on first access,
+    so a caller never has to know whether startup has run yet."""
+    if not _channels:
+        load_channels()
+    return _channels.get(name)
+
+
 async def deliver(event: dict, rule: dict, configs: dict[str, dict]) -> bool:
     """Sends one event to every configured channel. Never raises.
 

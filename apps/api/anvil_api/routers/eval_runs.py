@@ -29,7 +29,12 @@ from ..schemas.evaluation import (
     RunComparison,
 )
 from ..services.analysis import compare_runs
-from ..services.graders_catalog import builtin_graders, builtin_names, validate_grader_config
+from ..services.graders_catalog import (
+    announced_plugins,
+    builtin_graders,
+    builtin_names,
+    validate_grader_config,
+)
 from ..streams import EVAL_JOBS_STREAM
 
 log = logging.getLogger(__name__)
@@ -43,9 +48,17 @@ TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
 @router.get("/graders", response_model=list[GraderInfo])
 async def list_graders(caller: Caller = Depends(current_caller)):
-    """Registry-driven picker data (plan/plugins.md §2). Built-ins only — the
-    API can't enumerate plugins installed in the worker image."""
-    return [GraderInfo(**g) for g in builtin_graders()]
+    """Registry-driven picker data (plan/plugins.md §2).
+
+    Built-ins from the shared catalog, then whatever plugin graders the worker has
+    announced (ADR-0023) — the API cannot import the worker, so it learns about
+    installed plugins from a TTL'd Redis snapshot. Built-ins first and always
+    present: if the snapshot is missing or Redis is down, the picker is still a
+    working picker.
+    """
+    graders = [GraderInfo(**g, source="builtin") for g in builtin_graders()]
+    graders.extend(GraderInfo(**g) for g in await announced_plugins(get_redis()))
+    return graders
 
 
 async def owned_run(run_id: uuid.UUID, caller: Caller, session: AsyncSession) -> EvalRun:

@@ -60,8 +60,19 @@ export function GraderPicker({
                       className="mt-0.5 h-3.5 w-3.5 accent-[#3B76FF]"
                     />
                     <span className="min-w-0">
-                      <span className="block font-mono text-[13px] font-medium text-ink">
+                      <span className="flex items-center gap-1.5 font-mono text-[13px] font-medium text-ink">
                         {grader.name}
+                        {/* Says where an unfamiliar name came from. Someone
+                            reviewing a run config should not have to guess
+                            whether a grader is Anvil's or a local install. */}
+                        {grader.source === "plugin" && (
+                          <span
+                            className="rounded-full border border-line px-1.5 py-px text-2xs font-normal text-ink-faint"
+                            title="Provided by a plugin installed in the worker"
+                          >
+                            plugin
+                          </span>
+                        )}
                       </span>
                       <span className="mt-0.5 block text-2xs leading-relaxed text-ink-muted">
                         {grader.description}

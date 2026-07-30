@@ -272,6 +272,9 @@ export interface GraderInfo {
   name: string;
   kind: "deterministic" | "judge";
   description: string;
+  /** "plugin" means it came from a package installed in the worker (ADR-0023) —
+   *  worth showing, since a teammate may not recognise the name. */
+  source?: "builtin" | "plugin";
   config_schema: {
     type: "object";
     properties?: Record<

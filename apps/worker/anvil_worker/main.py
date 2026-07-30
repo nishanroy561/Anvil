@@ -13,6 +13,7 @@ from prometheus_client import start_http_server
 
 from . import dogfood
 from .alerter import Alerter
+from .announce import Announcer
 from .channels import load_channels
 from .config import get_settings
 from .eval_runner import EvalRunner
@@ -44,8 +45,12 @@ async def main() -> None:
     sampler = Sampler()
     alerter = Alerter()
     retention = Retention()
+    # Tells the API which plugin graders exist here, so they reach the picker
+    # without the API importing this package (ADR-0023).
+    announcer = Announcer(client)
 
     tasks = [
+        asyncio.create_task(announcer.run()),
         asyncio.create_task(consumer.run()),
         asyncio.create_task(run_reaper()),
         asyncio.create_task(feedback.run()),
@@ -65,6 +70,7 @@ async def main() -> None:
         sampler.stop()
         alerter.stop()
         retention.stop()
+        announcer.stop()
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

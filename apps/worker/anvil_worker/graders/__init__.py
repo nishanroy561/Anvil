@@ -141,6 +141,56 @@ def catalog() -> list[dict]:
     return json.loads(CATALOG_PATH.read_text(encoding="utf-8"))["graders"]
 
 
+def _config_schema_of(grader: Grader) -> dict:
+    """A plugin's declared config schema, as plain JSON Schema.
+
+    Accepts a dict or a pydantic model (plugins.md §1 writes the contract as
+    `config_schema: type[BaseModel]`), and tolerates neither — a plugin with no
+    schema is offered with a free-form config editor rather than hidden.
+    """
+    schema = getattr(grader, "config_schema", None)
+    if isinstance(schema, dict):
+        return schema
+    model_json_schema = getattr(schema, "model_json_schema", None)
+    if callable(model_json_schema):
+        try:
+            return model_json_schema()
+        except Exception:  # noqa: BLE001 - a broken schema costs the form, not the grader
+            log.warning("grader %r has an unusable config_schema", grader.name, exc_info=True)
+    return {"type": "object", "properties": {}, "additionalProperties": True}
+
+
+def plugin_snapshot() -> list[dict]:
+    """Catalog-shaped entries for the graders that are *not* built in.
+
+    Published to Redis so the API can offer plugins in the picker without
+    importing the worker (ADR-0023). Built-ins are excluded because the API
+    already has them from the shared catalog, and sending them twice would make
+    the API arbitrate a conflict it has no reason to see.
+    """
+    if not _graders:
+        load_graders()
+
+    builtin = {g["name"] for g in catalog()}
+    entries = []
+    for name, grader in sorted(_graders.items()):
+        if name in builtin:
+            continue
+        entries.append(
+            {
+                "name": name,
+                "kind": getattr(grader, "kind", "deterministic"),
+                "description": (
+                    getattr(grader, "description", None)
+                    or f"Third-party grader {name!r} (installed as a plugin)"
+                ),
+                "config_schema": _config_schema_of(grader),
+                "compares_expected": bool(getattr(grader, "compares_expected", False)),
+            }
+        )
+    return entries
+
+
 async def run_grader(
     name: str, output: Any, context: GradeContext, config: dict
 ) -> tuple[GradeResult | None, str | None]:
@@ -166,8 +216,44 @@ async def run_grader(
         log.exception("grader %r raised", name)
         return None, f"{type(exc).__name__}: {exc}"[:500]
 
-    if not isinstance(result, GradeResult):
-        return None, f"grader {name!r} returned {type(result).__name__}, expected GradeResult"
-    # Clamp rather than reject: a plugin returning 1.2 is sloppy, not fatal.
-    result.score = max(0.0, min(1.0, float(result.score)))
-    return result, None
+    return _coerce_result(name, result)
+
+
+def _coerce_result(name: str, result: Any) -> tuple[GradeResult | None, str | None]:
+    """Accept anything shaped like a `GradeResult`, not only the class itself.
+
+    This used to be an `isinstance` check, which quietly made the grader contract
+    stricter than plugins.md §1 specifies it: the spec says `Protocol` —
+    structural typing — and every other extension point here is duck-typed. An
+    `isinstance` gate forces every plugin to `from anvil_worker.graders import
+    GradeResult`, which is precisely the dependency on Anvil's internals the
+    entry-point design exists to avoid. The example plugin returning its own
+    small dataclass is what surfaced it.
+
+    Structural does not mean unchecked. A grader returning a string, or `None`, or
+    an object with no usable score is still an item-level error — just diagnosed
+    here rather than crashing wherever `.score` was first read.
+    """
+    if result is None:
+        return None, f"grader {name!r} returned None, expected a result with a score"
+
+    score = getattr(result, "score", None)
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None, (
+            f"grader {name!r} returned {type(result).__name__} with "
+            f"score={score!r}; expected a number 0..1"
+        )
+
+    detail = getattr(result, "detail", None)
+    return (
+        GradeResult(
+            # Clamp rather than reject: a plugin returning 1.2 is sloppy, not fatal.
+            score=max(0.0, min(1.0, float(score))),
+            detail=detail if isinstance(detail, dict) else {},
+            reasoning=getattr(result, "reasoning", None),
+            tokens_in=getattr(result, "tokens_in", None),
+            tokens_out=getattr(result, "tokens_out", None),
+            model=getattr(result, "model", None),
+        ),
+        None,
+    )

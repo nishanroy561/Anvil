@@ -141,12 +141,19 @@ class EvalResultPage(BaseModel):
 
 class GraderInfo(BaseModel):
     """Drives the UI's grader picker — the registry is the source of truth, so
-    an installed plugin appears without a frontend change (plan/plugins.md §2)."""
+    an installed plugin appears without a frontend change (plan/plugins.md §2).
+
+    Built-ins come from the shared catalog; plugins arrive via the snapshot the
+    worker announces over Redis and are marked `source="plugin"`, because "this
+    grader came from a package you installed" is worth saying next to a name
+    nobody on the team may recognise (ADR-0023).
+    """
 
     name: str
     kind: Literal["deterministic", "judge"]
     description: str
     config_schema: dict
+    source: Literal["builtin", "plugin"] = "builtin"
 
 
 # ---- comparison (plan/evaluation.md §4, ADR-0008) ---------------------------
