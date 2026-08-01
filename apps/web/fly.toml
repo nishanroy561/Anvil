@@ -1,0 +1,26 @@
+app = "anvil-web"
+primary_region = "bom"   # Mumbai — matches Upstash Redis region
+
+[build]
+  dockerfile = "Dockerfile"
+  # WEB_API_BASE_URL is baked into the Next.js build (see apps/web/Dockerfile).
+  # Update this to your actual API URL before deploying.
+  [build.args]
+    WEB_API_BASE_URL = "https://anvil-api.fly.dev"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = "512mb"   # Next.js standalone needs a bit more than 256mb
+  cpu_kind = "shared"
+  cpus = 1
