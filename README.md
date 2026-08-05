@@ -108,6 +108,7 @@ suite.
 | **Failure inbox** | Thumbs-down traces not yet in a dataset — a triage queue that drains as you promote |
 | **Datasets** | Promote real traces; items copy their payloads, so they outlive retention |
 | **Graders** | 6 deterministic + 4 LLM judges, or [write your own](PLUGINS.md) |
+| | *The 4 judges need a rebuild — see [LLM judges](#llm-judges) below* |
 | **Comparison** | Paired bootstrap and exact McNemar — and it says *inconclusive* when it is |
 | **CI gate** | `anvil eval run`, with exit codes a workflow can branch on |
 | **Monitors** | Score live traffic on a schedule; alert on drift, cost, latency |
@@ -116,6 +117,24 @@ suite.
 ![The traces list with filters and the feedback column](docs/screenshots/traces-list.jpg)
 
 ![The failure inbox](docs/screenshots/failure-inbox.jpg)
+
+### LLM judges
+
+The 6 deterministic graders work on a default install. The 4 **LLM judges**
+(`accuracy`, `hallucination`, `tone`, `custom`) need two things the quickstart
+does not give you:
+
+```bash
+# 1. a provider key in .env — ANTHROPIC_API_KEY, GOOGLE_API_KEY or GROQ_API_KEY
+# 2. a worker built with the judge SDKs
+WORKER_EXTRAS=[judges,otel] docker compose up -d --build worker
+```
+
+The default image omits three provider SDKs deliberately — they are a large
+dependency for a feature many installs never use — so **the grader picker offers
+the judges before the worker can run them.** Pick one without the rebuild and the
+run completes with every item errored and `mean: null`, which is the honest
+result rather than a silent zero, and the item error names this fix.
 
 ## Architecture
 

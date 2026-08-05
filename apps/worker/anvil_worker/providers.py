@@ -92,6 +92,28 @@ def default_provider() -> tuple[str, str] | None:
     return None
 
 
+def _missing_provider(package: str, exc: Exception) -> RuntimeError:
+    """The error an operator sees when a judge's provider SDK is absent.
+
+    This is the **default `docker compose up` experience**, not an edge case: the
+    worker image builds with `WORKER_EXTRAS=[otel]`, deliberately excluding three
+    provider SDKs for a feature many installs never use — but the grader picker
+    still offers all four LLM judges. So the first judged run a new operator
+    starts comes back with every item errored, and the bare
+    "No module named 'langchain_google_genai'" tells them nothing they can act on.
+
+    The remedy is a *rebuild with a different build arg*, which nobody guesses.
+    Naming it here costs one line and turns a dead end into an instruction.
+    """
+    return RuntimeError(
+        f"{package} is not installed in this worker. LLM judges need the "
+        f"'judges' extra: rebuild with WORKER_EXTRAS=[judges,otel] "
+        f"(docker compose build worker), or `pip install -e apps/worker[judges]` "
+        f"when running from a checkout. Deterministic graders need none of this. "
+        f"({exc})"
+    )
+
+
 def build_chat_model(model: str | None, **kwargs):
     """Constructs a LangChain chat model for `model`.
 
@@ -112,7 +134,7 @@ def build_chat_model(model: str | None, **kwargs):
         try:
             from langchain_anthropic import ChatAnthropic
         except ImportError as exc:
-            raise RuntimeError(f"langchain-anthropic not installed: {exc}") from exc
+            raise _missing_provider("langchain-anthropic", exc) from exc
         # No temperature: current Claude models reject non-default sampling
         # parameters, and the judge wants determinism anyway.
         return ChatAnthropic(model=model_name, max_tokens=kwargs.get("max_tokens", 1024))
@@ -121,7 +143,7 @@ def build_chat_model(model: str | None, **kwargs):
         try:
             from langchain_groq import ChatGroq
         except ImportError as exc:
-            raise RuntimeError(f"langchain-groq not installed: {exc}") from exc
+            raise _missing_provider("langchain-groq", exc) from exc
         # Only the first segment is the routing prefix; the rest is Groq's own
         # model id, which may itself contain a slash (`openai/gpt-oss-120b`).
         return ChatGroq(
@@ -132,7 +154,7 @@ def build_chat_model(model: str | None, **kwargs):
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
     except ImportError as exc:
-        raise RuntimeError(f"langchain-google-genai not installed: {exc}") from exc
+        raise _missing_provider("langchain-google-genai", exc) from exc
     return ChatGoogleGenerativeAI(
         model=model_name,
         max_output_tokens=kwargs.get("max_tokens", 1024),
