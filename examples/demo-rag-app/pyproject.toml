@@ -24,3 +24,15 @@ include = ["demo*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+  # `fastapi.testclient` re-exports starlette's TestClient, and starlette emits
+  # this at *import* time — so it fires from the import line itself and nothing
+  # in this suite can avoid it short of dropping the TestClient. Silencing the
+  # specific message rather than the category, so a deprecation in our own code
+  # still surfaces. Remove when FastAPI moves to httpx2.
+  #
+  # The category is Starlette's own class, which subclasses **UserWarning**, not
+  # DeprecationWarning — naming the obvious-looking category here matches nothing
+  # and the filter silently does nothing.
+  "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
+]
