@@ -134,6 +134,42 @@ async def test_an_invalid_cron_is_refused(tenant):
     assert res.json()["error"]["code"] == "invalid_cron"
 
 
+async def test_cron_validation_refuses_rather_than_skips_when_croniter_is_missing(
+    tenant, monkeypatch
+):
+    """The check must not quietly disappear when its library is absent.
+
+    `croniter` used to be a *worker-only* dependency and this validator returned
+    silently when the import failed. In dev both services share an environment, so
+    the test above passed — and in the API image, where croniter was not
+    installed, every cron was accepted unchecked. The check was green everywhere
+    it was tested and absent everywhere it ran.
+
+    croniter is now declared in `apps/api/pyproject.toml`, so this path should be
+    unreachable; the test pins the *shape* of the failure, because "silently
+    accept" is the one answer that recreates the original bug.
+    """
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_croniter(name, *args, **kwargs):
+        if name == "croniter":
+            raise ImportError("simulated missing croniter")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_croniter)
+
+    res = await tenant.client.post(
+        f"/v1/projects/{tenant.project_id}/monitors",
+        json=monitor_body(schedule_cron="*/10 * * * *"),
+    )
+    # Anything but a 2xx. Refusing a valid cron is a bad day; accepting an
+    # unvalidated one is a monitor that never runs and never says so.
+    assert res.status_code >= 500
+    assert res.json()["error"]["code"] == "cron_validation_unavailable"
+
+
 async def test_an_invalid_grader_config_is_refused(tenant):
     """Same class of silent failure as the eval path: `contains` with no value
     matches every string and scores a confident 1.0 forever."""

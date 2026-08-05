@@ -9,6 +9,7 @@ at 3am: a monitor with an unparseable schedule silently never runs, which is
 indistinguishable from one that runs and finds nothing wrong.
 """
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -36,13 +37,37 @@ from ..schemas.monitoring import (
 from ..services.graders_catalog import builtin_names, validate_grader_config
 
 router = APIRouter(prefix="/v1", tags=["monitors"])
+log = logging.getLogger(__name__)
 
 
 def validate_cron(expression: str) -> None:
+    """Refuse a schedule the sampler could never act on.
+
+    The import failure used to `return`, silently accepting anything. croniter was
+    a *worker* dependency, so in dev — where both services' requirements share an
+    environment — validation ran and the test below passed, while in the API image
+    it was skipped entirely. That is the worst possible split: the check appears
+    to work everywhere it is tested and is absent everywhere it is deployed.
+
+    croniter is now a declared dependency of this service, so the fallback should
+    be unreachable. It refuses rather than accepts, because the harm being
+    prevented is a monitor that never runs and looks healthy doing it — and
+    creating one we could not validate is exactly that harm.
+    """
     try:
         from croniter import croniter
-    except ImportError:  # pragma: no cover - croniter is a worker dependency
-        return
+    except ImportError as exc:
+        log.error("croniter is missing from the API image; cannot validate cron expressions")
+        raise HTTPException(
+            500,
+            detail={
+                "code": "cron_validation_unavailable",
+                "message": (
+                    "The server cannot validate cron expressions right now, so it "
+                    "will not create a monitor that might never run."
+                ),
+            },
+        ) from exc
     if not croniter.is_valid(expression):
         raise HTTPException(
             400,

@@ -19,6 +19,11 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=7.0",
     "prometheus-client>=0.20",  # metrics.py declares series directly
     "numpy>=1.26",  # paired bootstrap in services/analysis.py (ADR-0008)
+    # routers/monitors.py rejects an unparseable cron at create time. This was
+    # previously a worker-only dependency and the check silently no-opped when the
+    # import failed — so it worked in dev (where the worker's deps share the env)
+    # and did nothing at all in the API image, which is the only place it matters.
+    "croniter>=2.0",
 ]
 
 [project.optional-dependencies]
