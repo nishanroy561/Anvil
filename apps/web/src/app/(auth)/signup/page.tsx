@@ -6,6 +6,24 @@ import { useState } from "react";
 import { ApiError, signup } from "@/lib/api";
 import { Spinner } from "@/components/ui";
 
+/**
+ * A 422 rendered for someone signing up rather than for whoever wrote the SDK.
+ *
+ * The server's field messages come from pydantic and are accurate but occasionally
+ * speak schema — "String should have at least 8 characters" under a box labelled
+ * PASSWORD. Only that one shape is reworded; everything else is passed through as
+ * the server phrased it, because the failure mode being fixed here is a client
+ * that thinks it knows better than the server which field was wrong.
+ */
+function friendly422(err: ApiError): string {
+  const field = err.fields[0];
+  if (!field) return "Check the details and try again.";
+  if (field.path.endsWith("password") && field.type === "string_too_short") {
+    return "Password needs at least 8 characters.";
+  }
+  return field.message;
+}
+
 export default function SignupPage() {
   const router = useRouter();
   const [orgName, setOrgName] = useState("");
@@ -26,7 +44,12 @@ export default function SignupPage() {
       if (err instanceof ApiError && err.status === 400) {
         setError("Couldn't create the account. Check the details and try again.");
       } else if (err instanceof ApiError && err.status === 422) {
-        setError("Password needs at least 8 characters.");
+        // Say what the server actually rejected. This used to be a flat
+        // "Password needs at least 8 characters" for *every* 422 — so a
+        // rejected email (a reserved TLD, say) told the user to change their
+        // password, which can never work however many times they try it. The
+        // API names the offending field precisely so a client can do this.
+        setError(friendly422(err));
       } else {
         setError("Couldn't reach the API. Check that it's running, then try again.");
       }

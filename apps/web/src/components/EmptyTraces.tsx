@@ -20,11 +20,15 @@ export function EmptyTraces({ projectId }: { projectId: string }) {
       .catch(() => {});
   }, [projectId]);
 
-  const snippet = `from anvil_sdk import Anvil, observe
+  // This is the first code a new account ever runs, so it has to be the real
+  // API. It previously advertised `from anvil_sdk import Anvil, observe` and a
+  // client argument to the decorator — neither exists, so copying it raised
+  // ImportError on the first line. Matches the README and `anvil_sdk.__all__`.
+  const snippet = `import anvil_sdk as anvil
 
-anvil = Anvil(api_key="${prefix}")  # full key from Settings
+anvil.init(api_key="${prefix}")  # full key from Settings
 
-@observe(anvil, name="my_pipeline")
+@anvil.observe(type="llm")
 def answer(question: str) -> str:
     ...`;
 

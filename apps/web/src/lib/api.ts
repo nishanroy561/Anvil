@@ -32,14 +32,37 @@ import type {
   UserOut,
 } from "./types";
 
+/**
+ * One entry from a 422's `error.fields`. The API keeps per-field detail rather
+ * than flattening a validation failure to a sentence (Phase 11 §2) — `path` is
+ * the dotted location (`body.email`) and `message` is already human-readable.
+ */
+export interface ApiErrorField {
+  path: string;
+  message: string;
+  type: string;
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
+  /**
+   * Populated on 422s. Dropping these was a real bug: the signup form mapped
+   * every 422 to "password too short", so a rejected *email* told the user to
+   * change their password — advice that can never work.
+   */
+  fields: ApiErrorField[];
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, fields: ApiErrorField[] = []) {
     super(message);
     this.status = status;
     this.code = code;
+    this.fields = fields;
+  }
+
+  /** The first field message, when the server named one. */
+  get fieldMessage(): string | null {
+    return this.fields[0]?.message ?? null;
   }
 }
 
@@ -55,6 +78,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     let code = "unknown";
     let message = `Request failed (${res.status})`;
+    let fields: ApiErrorField[] = [];
     try {
       const body = await res.json();
       // `error` first: it is the current shape, and a server that sends both
@@ -63,13 +87,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if (typeof detail === "object" && detail !== null) {
         code = detail.code ?? code;
         message = detail.message ?? message;
+        if (Array.isArray(detail.fields)) fields = detail.fields as ApiErrorField[];
       } else if (typeof detail === "string") {
         message = detail;
       }
     } catch {
       // non-JSON error body — keep the generic message
     }
-    throw new ApiError(res.status, code, message);
+    throw new ApiError(res.status, code, message, fields);
   }
 
   return res.json();
