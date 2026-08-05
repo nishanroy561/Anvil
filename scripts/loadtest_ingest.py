@@ -10,6 +10,11 @@ Prerequisites: Postgres + Redis up, migrations applied, and the API running
 
     python scripts/loadtest_ingest.py --traces 1000 --kill-worker
 
+The run provisions a throwaway tenant and **removes it again on the way out**,
+pass or fail, so repeated acceptance runs don't silt up the dev database with
+`Loadtest <hex>` orgs. Pass `--keep` to leave it behind and inspect it in the
+dashboard.
+
 Exit code 0 means the acceptance criterion passed.
 """
 
@@ -25,6 +30,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
+
+from _tenants import drop_tenant
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER_DIR = ROOT / "apps" / "worker"
@@ -209,6 +216,11 @@ async def main() -> int:
     )
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument(
+        "--keep",
+        action="store_true",
+        help="leave the seeded tenant behind (to inspect it in the dashboard)",
+    )
+    parser.add_argument(
         "--database-url",
         default=os.environ.get(
             "DATABASE_URL", "postgresql+asyncpg://anvil:anvil@localhost:5432/anvil"
@@ -272,35 +284,47 @@ async def main() -> int:
     finally:
         worker.kill()
 
-    print()
-    print(f"  sent:             {sent}")
-    print(f"  distinct traces:  {distinct}")
-    print(f"  trace rows:       {total}")
-    print(f"  spans:            {spans} (expected {expected_spans})")
-    print(f"  worker killed at: {killed_at if killed_at else 'not killed'}")
-    print(f"  elapsed:          {elapsed:.1f}s")
-    print()
-
-    failures = []
-    if distinct != args.traces:
-        failures.append(f"LOSS: {args.traces - distinct} traces never persisted")
-    if total != distinct:
-        failures.append(f"DUPLICATES: {total} rows for {distinct} distinct ids")
-    if spans != expected_spans:
-        failures.append(f"SPAN MISMATCH: {spans} persisted, {expected_spans} expected")
-
-    if not failures:
-        print("-> verifying read APIs")
-        failures.extend(await verify_reads(args.api, email, project_id, args.traces))
+    try:
+        print()
+        print(f"  sent:             {sent}")
+        print(f"  distinct traces:  {distinct}")
+        print(f"  trace rows:       {total}")
+        print(f"  spans:            {spans} (expected {expected_spans})")
+        print(f"  worker killed at: {killed_at if killed_at else 'not killed'}")
+        print(f"  elapsed:          {elapsed:.1f}s")
         print()
 
-    if failures:
-        for failure in failures:
-            print(f"FAIL  {failure}")
-        return 1
+        failures = []
+        if distinct != args.traces:
+            failures.append(f"LOSS: {args.traces - distinct} traces never persisted")
+        if total != distinct:
+            failures.append(f"DUPLICATES: {total} rows for {distinct} distinct ids")
+        if spans != expected_spans:
+            failures.append(f"SPAN MISMATCH: {spans} persisted, {expected_spans} expected")
 
-    print("PASS  zero loss, zero duplicates across a mid-run worker kill")
-    return 0
+        if not failures:
+            print("-> verifying read APIs")
+            failures.extend(await verify_reads(args.api, email, project_id, args.traces))
+            print()
+
+        if failures:
+            for failure in failures:
+                print(f"FAIL  {failure}")
+            # The tenant is about to be removed, which is unhelpful when you
+            # wanted to go and look at what went wrong. Say so while the failure
+            # is on screen rather than in the docstring.
+            if not args.keep:
+                print("\n(re-run with --keep to leave the data behind for inspection)")
+            return 1
+
+        print("PASS  zero loss, zero duplicates across a mid-run worker kill")
+        return 0
+    finally:
+        if args.keep:
+            print(f"\n(kept: project {project_id})")
+        else:
+            print("\n-> cleaning up the seeded tenant")
+            await drop_tenant(args.database_url, project_id)
 
 
 if __name__ == "__main__":

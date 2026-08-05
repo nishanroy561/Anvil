@@ -25,24 +25,35 @@ because five items cannot establish it. That refusal is the feature.
 import sys
 import time
 
+import uuid
+
 import httpx
 
+from _tenants import DEFAULT_DATABASE_URL, drop_tenant_sync
+
 BASE = "http://localhost:8000"
-EMAIL, PASSWORD = "demo@anvil.dev", "demo1234"
+PASSWORD = "compare-acceptance-pw"
 
 REFUSAL = "I'm sorry, I don't know the answer to that."
 ANSWER = "The deployment finished at 14:02 UTC and all checks passed."
 
 
-def login() -> httpx.Client:
+def new_tenant() -> tuple[httpx.Client, str]:
+    """Its own org and project, torn down at the end.
+
+    This used to log in as the seeded demo user and take `/v1/projects[0]`,
+    which had two costs: the datasets and eval runs it creates piled up inside
+    real demo data where no teardown could safely tell them apart, and the
+    acceptance could only run on a box where `python -m anvil_api.seed` had been
+    run first. A fresh signup fixes both.
+    """
     c = httpx.Client(base_url=BASE, timeout=30.0)
-    r = c.post("/v1/auth/login", json={"email": EMAIL, "password": PASSWORD})
-    r.raise_for_status()
-    return c
-
-
-def project_id(c: httpx.Client) -> str:
-    return c.get("/v1/projects").json()[0]["id"]
+    email = f"compare-{uuid.uuid4().hex[:8]}@example.com"
+    c.post(
+        "/v1/auth/signup",
+        json={"email": email, "password": PASSWORD, "org_name": "Compare Acceptance"},
+    ).raise_for_status()
+    return c, c.get("/v1/projects").json()[0]["id"]
 
 
 def make_dataset(c: httpx.Client, pid: str, name: str) -> str:
@@ -140,8 +151,19 @@ def show(out: dict) -> dict:
 
 
 def main() -> int:
-    c = login()
-    pid = project_id(c)
+    c, pid = new_tenant()
+    try:
+        return run_checks(c, pid)
+    finally:
+        c.close()
+        if "--keep" in sys.argv:
+            print(f"\n(kept: project {pid})")
+        else:
+            print("\n=== cleaning up the acceptance tenant ===")
+            drop_tenant_sync(DEFAULT_DATABASE_URL, pid)
+
+
+def run_checks(c: httpx.Client, pid: str) -> int:
     failures = []
 
     print("\n=== 1. n=40, real shift: must be called ===")

@@ -54,6 +54,9 @@ from anvil_worker.ingest_consumer import IngestConsumer  # noqa: E402
 from anvil_worker.streams import FEEDBACK_DEFERRED_KEY  # noqa: E402
 from anvil_worker.tables import eval_results, feedback as feedback_table  # noqa: E402
 
+from _liveworker import refuse_if_worker_running  # noqa: E402
+from _tenants import drop_tenant  # noqa: E402
+
 BASE = "http://localhost:8000"
 PASSWORD = "hunter2hunter2"
 
@@ -68,6 +71,14 @@ def now() -> datetime:
 
 
 # ---- live API helpers -------------------------------------------------------
+
+
+# Every tenant this run provisions, so the teardown can remove them all even if
+# an assertion fails before the second one is built. Without this the script left
+# a `Phase 9 main` and a `Phase 9 other` org behind on every run — six of them had
+# accumulated in the dev database before anyone looked.
+CREATED_PROJECTS: list[str] = []
+KEEP = "--keep" in sys.argv
 
 
 def new_tenant(label: str) -> tuple[httpx.Client, str, str]:
@@ -86,6 +97,7 @@ def new_tenant(label: str) -> tuple[httpx.Client, str, str]:
     key = client.post(
         f"/v1/projects/{project_id}/api-keys", json={"name": "acceptance"}
     ).json()["key"]
+    CREATED_PROJECTS.append(project_id)
     return client, project_id, key
 
 
@@ -172,6 +184,17 @@ async def main() -> int:
         print(f"cannot reach the API at {BASE}: {exc}")
         print("start it with: cd apps/api && python -m uvicorn anvil_api.main:app --port 8000")
         return 1
+
+    # Before anything is provisioned: a live worker makes every count below zero
+    # for reasons that have nothing to do with the code under test.
+    from anvil_worker.streams import PERSISTERS_GROUP, TRACES_STREAM
+
+    clash = await refuse_if_worker_running(
+        redis, TRACES_STREAM, PERSISTERS_GROUP, {"acceptance-ingest"}
+    )
+    if clash:
+        print(f"\n{clash}")
+        return 2
 
     session, project_id, api_key = new_tenant("main")
     ingest = IngestConsumer(redis, consumer_name="acceptance-ingest")
@@ -341,6 +364,14 @@ async def main() -> int:
         session.close()
         await redis.aclose()
         await engine.dispose()
+        # After `engine.dispose()` on purpose: this opens its own asyncpg
+        # connection, so it does not depend on the ORM engine still being alive.
+        if KEEP:
+            print(f"\n(kept: projects {', '.join(CREATED_PROJECTS)})")
+        elif CREATED_PROJECTS:
+            print("\n=== cleaning up the acceptance tenants ===")
+            for created in CREATED_PROJECTS:
+                await drop_tenant(settings.database_url, created)
 
     print()
     if failures:

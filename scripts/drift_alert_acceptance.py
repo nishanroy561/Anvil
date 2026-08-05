@@ -33,6 +33,7 @@ from sqlalchemy import insert, select, text  # noqa: E402
 
 from anvil_worker.alerter import evaluate  # noqa: E402
 from anvil_worker.channels import load_channels  # noqa: E402
+from anvil_worker.config import get_settings  # noqa: E402
 from anvil_worker.db import engine  # noqa: E402
 from anvil_worker.graders import load_graders  # noqa: E402
 from anvil_worker.sampler import run_monitor  # noqa: E402
@@ -43,6 +44,9 @@ from anvil_worker.tables import (  # noqa: E402
     monitor_scores,
     traces,
 )
+
+from _liveworker import refuse_if_worker_running  # noqa: E402
+from _tenants import drop_tenant  # noqa: E402
 
 RECEIVED: list[dict] = []
 
@@ -175,6 +179,26 @@ async def main() -> int:
         if not ok:
             failures.append(f"{label} {detail}")
 
+    # A live worker's sampler claims monitors on its own 30-second tick, so it
+    # would race this script for the very monitor under test.
+    import redis.asyncio as _aioredis
+
+    from anvil_worker.config import get_settings as _get_settings
+    from anvil_worker.streams import PERSISTERS_GROUP, TRACES_STREAM
+
+    _probe = _aioredis.from_url(_get_settings().redis_url, decode_responses=True)
+    try:
+        clash = await refuse_if_worker_running(_probe, TRACES_STREAM, PERSISTERS_GROUP, set())
+    finally:
+        await _probe.aclose()
+    if clash:
+        print(f"\n{clash}")
+        server.shutdown()
+        return 2
+
+    # Bound before the try so the teardown can run even if `setup` is what fails.
+    project_id = None
+
     try:
         project_id, monitor, rule = await setup(webhook_url)
 
@@ -234,6 +258,14 @@ async def main() -> int:
     finally:
         server.shutdown()
         await engine.dispose()
+        # The monitor scores 280 traces into this project, and none of it is data
+        # anyone wants left in their dashboard. Removed unless --keep.
+        if project_id is not None:
+            if "--keep" in sys.argv:
+                print(f"\n(kept: project {project_id})")
+            else:
+                print("\n=== cleaning up the acceptance tenant ===")
+                await drop_tenant(get_settings().database_url, project_id)
 
     print()
     if failures:

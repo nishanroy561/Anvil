@@ -24,19 +24,33 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 import httpx
 
+from _tenants import DEFAULT_DATABASE_URL, drop_tenant_sync
+
 BASE = "http://localhost:8000"
+PASSWORD = "ci-gate-acceptance-pw"
 REFUSAL = "I'm sorry, I don't know."
 ANSWER = "The deploy finished at 14:02 UTC."
 
 
-def api() -> httpx.Client:
+def new_tenant() -> tuple[httpx.Client, str]:
+    """Its own org and project, torn down at the end.
+
+    This used to log in as the seeded demo user and take `/v1/projects[0]`, so
+    every run left datasets and eval runs inside real demo data, and the
+    acceptance only worked on a box that had been seeded first.
+    """
     c = httpx.Client(base_url=BASE, timeout=30.0)
-    c.post("/v1/auth/login", json={"email": "demo@anvil.dev", "password": "demo1234"}).raise_for_status()
-    return c
+    email = f"ci-gate-{uuid.uuid4().hex[:8]}@example.com"
+    c.post(
+        "/v1/auth/signup",
+        json={"email": email, "password": PASSWORD, "org_name": "CI Gate Acceptance"},
+    ).raise_for_status()
+    return c, c.get("/v1/projects").json()[0]["id"]
 
 
 def make_key(c: httpx.Client, project_id: str) -> str:
@@ -109,8 +123,19 @@ def last_run_id(c: httpx.Client, project_id: str) -> str:
 
 
 def main() -> int:
-    c = api()
-    project_id = c.get("/v1/projects").json()[0]["id"]
+    c, project_id = new_tenant()
+    try:
+        return run_checks(c, project_id)
+    finally:
+        c.close()
+        if "--keep" in sys.argv:
+            print(f"\n(kept: project {project_id})")
+        else:
+            print("\n=== cleaning up the acceptance tenant ===")
+            drop_tenant_sync(DEFAULT_DATABASE_URL, project_id)
+
+
+def run_checks(c: httpx.Client, project_id: str) -> int:
     key = make_key(c, project_id)
     failures: list[str] = []
 
