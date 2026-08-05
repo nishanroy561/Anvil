@@ -4,7 +4,205 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-07-30 (**Phase 11 complete — all 12 phases done**)
+Last updated: 2026-08-05 (**full verification pass + new-user walkthrough; seven fixes**)
+
+## 2026-08-05 (final) — every feature exercised; two more bugs
+
+New: **`scripts/feature_sweep.py`** — 88 checks over real HTTP covering auth,
+projects, API keys, ingest, every trace filter, search, keyset paging, metrics,
+feedback, the failure inbox, datasets, promotion, item editing, graders, eval
+runs, cancel, compare, monitors, alerts, usage, tenancy and session teardown. It
+provisions its own tenant and removes it. **88/88 against the compose stack.**
+
+It is breadth where the phase acceptances are depth, and it earned its place
+immediately by finding a bug none of the 565 unit tests could:
+
+1. **Cron validation was dead in the deployed API.** `croniter` was a *worker*
+   dependency, and `validate_cron()` returned silently when the import failed —
+   so it ran in dev, where both services' requirements share an environment and
+   `test_an_invalid_cron_is_refused` passes, and did nothing at all in the API
+   image. A typo'd cron was accepted with 201; `sampler.is_due()` then treats an
+   unparseable cron as *not due*, so the monitor never runs, forever, and looks
+   exactly like one finding nothing wrong. croniter is now an API dependency, the
+   import failure **refuses** instead of accepting, and a regression test pins
+   that shape. The test that already existed gave false confidence — worth
+   remembering when a check "passes everywhere".
+2. **The in-process acceptances failed cryptically against a running worker.**
+   `feedback_acceptance.py` and `drift_alert_acceptance.py` drive the consumer
+   loops themselves; a live worker drains the stream first and the run dies eight
+   steps in with `wrote 0`, which reads as a broken write path. New
+   `scripts/_liveworker.py` detects a competing consumer (by idle time, so a dead
+   consumer's leftover entry doesn't false-positive) and refuses in under a
+   second with the command to fix it.
+
+Also walked every dashboard page that had only ever been covered by an
+acceptance script: monitors, alerts, failure inbox, overview (5 tiles + 2 charts
+rendering real shapes), dataset detail, and the comparison view. The comparison
+page is worth singling out — asked to compare a run where every item errored
+against one that scored, it says *"no items were scored by both runs, so there is
+nothing to compare"* and reports n=0, rather than inventing a delta from nothing.
+
+## 2026-08-05 (last) — the compose path, which is the only install path there is
+
+Everything before this ran from a checkout — `uvicorn`, `next dev`, host Python.
+That is not how anyone installs this. `docker compose up -d --build --wait` from
+scratch, then the same walkthrough through the built images:
+
+- Five services healthy; `migrate` applied the schema before the API came up.
+- **Ingest works in the built API image** — the Phase 11 failure (package data
+  absent from an installed copy, so the first POST 500s with `FileNotFoundError`)
+  did not recur. The `[tool.setuptools.package-data]` declarations in both
+  pyprojects are what hold that, and they are still correct.
+- Fresh **signup through the web container**, whose `/api` proxy reached the API
+  container — the other Phase 11 compose bug, also not recurring.
+- `GET /v1/graders` returned all 10 built-ins, so `graders_catalog.json` is in
+  the API image too. `source` was `builtin` only, correctly: no plugin is
+  installed in the worker image.
+- 6 traces ingested → persisted by the worker container → promoted → rescore run
+  with `not_contains` → **mean 0.667**, right for 2 refusals out of 6.
+- The corrected onboarding snippet is baked into the web image.
+
+### The one real gap this found: judges are offered but cannot run
+
+The worker image builds with `WORKER_EXTRAS=[otel]`, which **deliberately** omits
+three provider SDKs. The grader picker, however, offers all four LLM judges under
+a "COST PER ITEM" heading. So a new operator following the README quickstart picks
+`accuracy`, waits, and gets six errored items and
+`No module named 'langchain_google_genai'` — a message that names no remedy, for a
+fix (rebuild with a different **build arg**) that nobody guesses.
+
+The failure *handling* was already right — `mean: null`, not zero; run completes.
+Two things were added rather than changing the dependency decision:
+`providers._missing_provider()` now names the exact fix in the item error, and
+the README has an **LLM judges** section saying judges need a key *and* a rebuild.
+Verified by rebuilding with `WORKER_EXTRAS=[judges,otel]` and re-running.
+
+## 2026-08-05 (later still) — the evaluate half, walked as a real user
+
+Signup proves the *observe* half; this proves the other one. As a brand-new
+account with eight of its own traces, through the dashboard:
+
+- Select 8 traces → **Add to dataset** → "Support answers v1", 8 items.
+- Rescore run with `not_contains: "I'm sorry"` → **mean 0.75, 75% pass**. Two of
+  the eight answers were refusals and scored 0.00; the other six scored 1.00.
+- Submitting that grader with an **empty config** was refused at run creation:
+  *"Config for grader 'not_contains' is invalid — 'value' is a required
+  property"*. The silent-pass guard is real and surfaces in the UI.
+- The grader picker listed `word_count_bounds` tagged **plugin** — ADR-0023
+  end to end, with the worker announcing over Redis and the API serving it.
+
+**The judged run is the best live demonstration of what this product is for.**
+Traces were promoted without editing `expected_output`, so each recorded output
+*is* its own reference. The Gemini judge duly scored every item 1.00 — and the
+run reports, under the headline number:
+
+> **measures nothing — graded against itself**
+
+with each row marked `(graded against itself)` and the judge's own reasoning
+saying "The answer is identical to the reference answer." A tool without ADR-0018
+would have printed "100% pass" and been believed. Cost: $0.00336 over 7 scored
+items.
+
+**A dead provider key is handled the way the aggregation rule promises.** The
+Anthropic key on this box has no credit balance; that run came back
+`mean: null` (not 0), `errored_items: 8`, `scored_items: 0`, and **status
+completed**. A broken judge is not reported as a quality collapse.
+
+## 2026-08-05 (later) — signed up as a real user, and three real bugs fell out
+
+The trigger was a plain question: *can a real user sign up and check it?* Reading
+the code says yes. Doing it in a browser found three defects, two of which sit
+directly on the path a brand-new account takes. **Every one came from running the
+product in a shape it had not been run in before** — the same lesson Phase 11
+recorded, relearned.
+
+The walkthrough now passes end to end: signup → org + `Default` project → create
+an API key → send a trace with the SDK → it appears in the list with a correct
+`$0.00090` cost roll-up → the waterfall renders both spans.
+
+1. **The worker died on a poison entry and could not be restarted.**
+   `IngestConsumer.run()` did its startup reclaim *outside* the read loop's
+   exception handler, so one unpersistable entry raised straight out of `run()`;
+   `main()` gathers the loops, so the **whole worker exited 1** — ingest,
+   feedback, evals, monitors, alerts and retention together — and every restart
+   re-read the same entry and died again. That is a crash loop no restart clears,
+   and it is exactly what checklist row 4 exists to prevent: the DLQ never ran
+   because the process died before reaching the loop that drives it.
+   `FeedbackConsumer.run()` had the identical shape. Both now log and continue;
+   the entries stay pending and dead-letter normally.
+   Regression test: `test_startup_reclaim_failure_does_not_kill_the_worker`,
+   **verified to fail against the pre-fix code** before the fix was restored.
+   Reproduced for real, not just in a fixture — a trace referencing a deleted
+   project violated `traces_project_id_fkey`.
+2. **The onboarding snippet did not run.** `EmptyTraces.tsx` advertised
+   `from anvil_sdk import Anvil, observe` and a client argument to the decorator.
+   Neither exists — the SDK exports `init()` and `AnvilClient` — so the first
+   code a new account ever copies raised `ImportError` on line one, while the
+   README showed the correct API. Now `import anvil_sdk as anvil` /
+   `anvil.init(...)` / `@anvil.observe(type="llm")`, executed verbatim to confirm
+   it ships a trace.
+3. **Signup blamed the password for every validation failure.** A rejected
+   *email* (`.test` is a reserved TLD) produced "Password needs at least 8
+   characters" — advice that cannot work however many times it is followed. The
+   API had named the field precisely; `lib/api.ts` was discarding `error.fields`,
+   which Phase 11 §2 preserved specifically so clients could act on it. `ApiError`
+   now carries `fields`, and the form shows what was actually wrong. The
+   password-too-short case keeps its friendly wording rather than pydantic's
+   "String should have at least 8 characters"; nothing else is reworded, because
+   the bug being fixed was a client second-guessing the server.
+
+Also closed: **`compare_acceptance.py` and `ci_gate_acceptance.py` now provision
+their own tenant** instead of logging in as the demo user and writing into
+`/v1/projects[0]`. That removes the last two scripts that polluted real demo data,
+and as a side effect they no longer require `python -m anvil_api.seed` to have
+been run. **All six acceptance scripts now clean up after themselves**, each with
+`--keep`.
+
+## 2026-08-05 — full test + acceptance pass, and what it turned up
+
+Ran every suite and every non-destructive acceptance script end to end. **All
+564 tests pass, all six acceptances pass, lint and `tsc --noEmit` are clean, and
+`next build` succeeds.** No product defect was found. Four things were fixed, and
+all four are about the *harness* rather than the thing being tested.
+
+1. **The acceptance scripts were leaking their throwaway tenants.**
+   `loadtest_reads.py` had always cleaned up; nothing else did. The dev database
+   had accumulated fourteen orgs — `Loadtest <hex>`, `Kill Test` ×2,
+   `Drift Acceptance`, `OTel Check` ×2, six copies of the Phase 9 pair — holding
+   ~6,000 traces of noise that sit in the operator's own dashboard looking like
+   real data. `loadtest_ingest.py` alone left 1,000 traces and ~7.5k spans behind
+   *per run*, and it is the one load test `make accept` invokes.
+   Teardown now lives once in **`scripts/_tenants.py`** and is wired into
+   `loadtest_ingest.py`, `feedback_acceptance.py` and `drift_alert_acceptance.py`;
+   each takes `--keep` for when you want to go and look at the result. Deletion
+   order follows the foreign keys, and the cleanup incidentally re-demonstrates
+   ADR-0018 — a dataset promoted from the deleted traces survives with its
+   payloads intact.
+2. **`bcrypt` 4.3.0 was installed against a declared `bcrypt>=4.0,<4.1` pin.**
+   Every password hash and verify logged a warning and a traceback
+   (`module 'bcrypt' has no attribute '__about__'` — passlib 1.7.4 reads
+   `__about__`, removed in bcrypt 4.1). The pin in `apps/api/pyproject.toml` was
+   correct and simply not honoured by the installed environment; reinstalling to
+   4.0.1 silenced it. **This is an environment drift that will recur** — anything
+   that upgrades bcrypt reintroduces it, and the symptom is noise rather than
+   failure, so nothing catches it.
+3. **The demo suite's one warning is filtered.** `fastapi.testclient` re-exports
+   Starlette's `TestClient` and Starlette warns at *import* time, so the suite
+   could not avoid it. The filter names the message and the real category —
+   `StarletteDeprecationWarning` subclasses **`UserWarning`**, not
+   `DeprecationWarning`, so the obvious-looking filter matches nothing and
+   silently does nothing. Remove it when FastAPI moves to httpx2.
+4. **The test count in this file was stale** (558 → 564), and the number is
+   plugin-dependent — see the note under Phase 11 §4/§6/§7.
+
+### Known, not fixed
+
+*(The `compare`/`ci_gate` demo-project pollution noted here was fixed later the
+same day — see the section above.)*
+
+The fifteen pre-existing orgs from the 2026-07-30 session are still there.
+`scripts/_tenants.py::drop_org` will remove them by id when someone wants the dev
+box tidy.
 
 ## Phase 11 — hardening & polish (2026-07-30). DONE, all seven items.
 
@@ -36,7 +234,9 @@ observability.md §4 now passes in full including the Tempo end-to-end trace.
 **§4/§6/§7 docs and `make test`.** `README.md` rewritten from the original brief
 paragraph into a project front page with screenshots in `docs/screenshots/`.
 `DEMO.md` is the five-minute path, every command of it executed. `make test` runs
-all five suites (**558 tests**), and `make lint` is clean.
+all five suites (**564 tests**), and `make lint` is clean. The count is
+plugin-dependent: `tests/test_plugins.py` carries a `requires_example` skipif, so
+a checkout that has not run `make test-plugins` reports 558 and skips the rest.
 
 ### Acceptance: fresh clone → compose up → full walkthrough, no manual fixes
 
@@ -580,7 +780,8 @@ built and checked in Chrome.
 top of this file.
 
 **All 12 phases (0–11) are complete.** `make test` is green across five suites
-(558 tests) and `make lint` is clean.
+(564 tests with the example plugin installed, 558 without) and `make lint` is
+clean.
 
 **Rule added this session:** frontend work (`apps/web`, components, styling)
 requires telling the user what you intend to build and getting a go-ahead first.
