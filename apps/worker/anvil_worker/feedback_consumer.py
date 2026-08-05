@@ -497,8 +497,19 @@ class FeedbackConsumer:
     async def run(self) -> None:
         await self.ensure_group()
         # Startup reclaim: entries a previous incarnation of this worker left
-        # pending are the ones most likely to be lost otherwise.
-        await self.process_stream(await self.reclaim_pending())
+        # pending are the ones most likely to be lost otherwise — and so the
+        # likeliest place to meet a poison message. Non-fatal for the same reason
+        # as the ingest consumer: raising here exits the whole worker before the
+        # loop that drives the DLQ ever runs, and the next start repeats it.
+        try:
+            await self.process_stream(await self.reclaim_pending())
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception(
+                "startup reclaim failed; entering the read loop anyway "
+                "(the entries stay pending and will be retried, then dead-lettered)"
+            )
 
         self._running = True
         last_reclaim = time.monotonic()

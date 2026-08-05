@@ -409,8 +409,31 @@ class IngestConsumer:
     async def run(self) -> None:
         await self.ensure_group()
         # Startup reclaim: entries a previous incarnation of this worker left
-        # pending are the ones most likely to be lost otherwise.
-        await self.process(await self.reclaim_pending())
+        # pending are the ones most likely to be lost otherwise — and, for the
+        # same reason, the likeliest place to meet a poison message.
+        #
+        # **This must not be fatal.** It used to run bare, outside the loop's
+        # handler below, so one unpersistable entry raised straight out of
+        # `run()`; `main()` gathers the loops, so the whole worker exited 1 and
+        # took ingest, feedback, evals, monitors, alerts and retention with it.
+        # Every restart re-read the same entry and died again — a crash loop that
+        # no amount of restarting clears, which is exactly the failure checklist
+        # row 4 exists to prevent. The DLQ never got a chance because the process
+        # died before reaching the loop that drives it.
+        #
+        # Swallowing it here is not "ignoring the error": the entries stay
+        # pending, the loop's periodic reclaim picks them up again, and their
+        # delivery count climbs to `max_deliveries` and dead-letters them. The
+        # difference is that the worker is alive to do it.
+        try:
+            await self.process(await self.reclaim_pending())
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception(
+                "startup reclaim failed; entering the read loop anyway "
+                "(the entries stay pending and will be retried, then dead-lettered)"
+            )
 
         self._running = True
         last_reclaim = time.monotonic()

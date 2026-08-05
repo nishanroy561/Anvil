@@ -150,3 +150,58 @@ async def test_pending_entries_from_a_dead_consumer_are_reclaimed(
     assert name == "orphaned by a crash"
     assert await _pending_count(redis_client) == 0
     assert message_id is not None
+
+
+async def test_startup_reclaim_failure_does_not_kill_the_worker(
+    consumer, redis_client, monkeypatch, project_factory
+):
+    """A pending entry that cannot be persisted must not take the process down.
+
+    Found by running it: deleting a project while one of its traces was still
+    buffered left an entry whose insert violates `traces_project_id_fkey`. The
+    startup reclaim ran outside the read loop's exception handler, so the error
+    escaped `run()`; `main()` gathers the loops, so the *entire worker* exited —
+    ingest, feedback, evals, monitors, alerts and retention — and every restart
+    re-read the same entry and died again.
+
+    The DLQ is what should absorb this, and it never ran, because the process
+    died before reaching the loop that drives it (checklist row 4).
+    """
+    project_id = await project_factory()
+    trace = make_trace(project_id, name="references a project that is gone")
+    await _publish(redis_client, trace)
+
+    # Take delivery without acking, so the entry is waiting for startup reclaim.
+    await redis_client.xreadgroup(
+        PERSISTERS_GROUP, "doomed-consumer", {TRACES_STREAM: ">"}, count=10
+    )
+    assert await _pending_count(redis_client) == 1
+
+    monkeypatch.setattr(consumer.settings, "reclaim_idle_ms", 0)
+
+    # Persisting this batch raises, exactly as the foreign-key violation did.
+    async def exploding_persist(_traces):
+        raise RuntimeError("insert or update on table 'traces' violates foreign key")
+
+    monkeypatch.setattr(consumer, "persist", exploding_persist)
+
+    # `run()` would loop forever, so stop it the moment the startup reclaim is
+    # behind us — what is under test is that we *reach* the loop at all.
+    async def stop_immediately():
+        return []
+
+    monkeypatch.setattr(consumer, "read_batch", stop_immediately)
+    original_process = consumer.process
+
+    async def process_then_stop(entries):
+        await original_process(entries)
+        consumer.stop()
+
+    monkeypatch.setattr(consumer, "process", process_then_stop)
+
+    # The assertion is simply that this returns rather than raising.
+    await consumer.run()
+
+    # The entry was not lost or silently acked — it is still pending, so the
+    # periodic reclaim will retry it and eventually dead-letter it.
+    assert await _pending_count(redis_client) == 1
