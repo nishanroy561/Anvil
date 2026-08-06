@@ -10,6 +10,7 @@ import { CopyButton } from "./ui";
  */
 export function EmptyTraces({ projectId }: { projectId: string }) {
   const [prefix, setPrefix] = useState<string>("ak_yourkey");
+  const [baseUrl, setBaseUrl] = useState<string>("");
 
   useEffect(() => {
     listApiKeys(projectId)
@@ -20,13 +21,30 @@ export function EmptyTraces({ projectId }: { projectId: string }) {
       .catch(() => {});
   }, [projectId]);
 
+  useEffect(() => {
+    // `init()` defaults `base_url` to http://localhost:8000. Omitting it here
+    // was silently fatal on any deployment that is not the reader's own laptop:
+    // the SDK never raises (ADR-0013), so a hosted-demo visitor who copied this
+    // sent their traces into their own machine, saw no error anywhere, and
+    // watched an empty dashboard forever.
+    //
+    // Derived from the page rather than configured, so it is right on Vercel, on
+    // a self-hoster's box and in local dev with no extra build variable to get
+    // wrong. `/api` is the same-origin proxy the dashboard itself uses
+    // (next.config.mjs), so it reaches the API wherever that happens to live.
+    setBaseUrl(`${window.location.origin}/api`);
+  }, []);
+
   // This is the first code a new account ever runs, so it has to be the real
   // API. It previously advertised `from anvil_sdk import Anvil, observe` and a
   // client argument to the decorator — neither exists, so copying it raised
   // ImportError on the first line. Matches the README and `anvil_sdk.__all__`.
   const snippet = `import anvil_sdk as anvil
 
-anvil.init(api_key="${prefix}")  # full key from Settings
+anvil.init(
+    api_key="${prefix}",  # full key from Settings
+    base_url="${baseUrl || "…"}",
+)
 
 @anvil.observe(type="llm")
 def answer(question: str) -> str:
@@ -49,9 +67,21 @@ def answer(question: str) -> str:
             {snippet}
           </pre>
         </div>
-        <p className="mt-3 text-2xs text-ink-faint">
-          pip install anvil-sdk · TypeScript: @anvil/sdk · traces appear within
-          seconds of your first request
+        {/*
+          `pip install anvil-sdk` is what this said, and it 404s — the package is
+          not on PyPI, so the very first instruction failed for everyone who was
+          not already working inside a checkout. Installing from the repository
+          is the command that actually works today; swap it back the day the SDK
+          is published.
+        */}
+        <p className="mt-3 text-2xs leading-relaxed text-ink-faint">
+          <code className="font-mono">
+            pip install
+            &quot;git+https://github.com/nishanroy561/Anvil.git#subdirectory=sdks/python&quot;
+          </code>
+          <br />
+          TypeScript: <code className="font-mono">@anvil/sdk</code> · traces
+          appear within seconds of your first request
         </p>
       </div>
     </div>
