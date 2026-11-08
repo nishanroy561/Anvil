@@ -4,8 +4,13 @@ version = "0.1.0"
 description = "Anvil Python SDK — trace instrumentation for LLM apps"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
 dependencies = ["httpx>=0.27"]
+
+[project.urls]
+Homepage = "https://github.com/nishanroy561/Anvil"
+Source = "https://github.com/nishanroy561/Anvil/tree/main/sdks/python"
+Issues = "https://github.com/nishanroy561/Anvil/issues"
 
 [project.scripts]
 anvil = "anvil_sdk.cli:main"
@@ -25,7 +30,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

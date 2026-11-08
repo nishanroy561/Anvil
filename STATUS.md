@@ -4,7 +4,60 @@
 > `plan/` doc for whatever you're implementing. Update this file whenever you
 > complete meaningful work — it is the handoff between sessions and models.**
 
-Last updated: 2026-08-05 (**full verification pass + new-user walkthrough; seven fixes**)
+Last updated: 2026-11-08 (**post-v1 reorientation; housekeeping fixes; open decisions listed**)
+
+## 2026-11-08 — where things actually stand (read this first)
+
+**v1 is complete.** Phases 0–11 in `plan.md` are done and verified; everything
+below this section is the history of getting there. What happened *after* v1
+was never recorded here, so this section closes that gap.
+
+### Off-plan work since 2026-08-05
+
+None of this is in `plan.md`; recorded so the next session doesn't rediscover it.
+
+| Date | Commit | What | Outcome |
+|---|---|---|---|
+| 08-01 | `b6e3f40` / `b55d1ad` | "Phase 12: Deployment" — Fly.io `fly.toml` ×3 | Removed the same day. **There is no Phase 12 in the plan.** |
+| 08-05 | `3a53a9a` / `ce693ce` | Hugging Face Space deploy for a hosted demo backend | Reverted. |
+| 08-06 | `ff42400` | Onboarding snippet derives `base_url` from the page; install line points at the git URL | Kept — correct for any deployment, hosted or not. |
+| 10-27 | *(uncommitted)* | `skills/anvil/` (+ `anvil.zip`): an agent skill teaching coding agents to instrument/evaluate with Anvil | Untracked. Decide: commit it, or keep it out of the repo. |
+
+### Fixed in this session
+
+- `CONTRIBUTIONS.md` → **`CONTRIBUTING.md`** (the name GitHub surfaces; post-v1
+  backlog item 1 is effectively done).
+- **OpenAI prices verified** (2026-11-08): `gpt-4o` $2.50/$10.00 and
+  `gpt-4o-mini` $0.15/$0.60 per MTok were already right; the "placeholders"
+  marker is gone. The whole price table is now verified.
+- **Python SDK is PyPI-ready**: `[project.urls]` added; license moved to the
+  SPDX string form (`license = "MIT"`, setuptools ≥77) — the old table form
+  emits a deprecation that becomes a build failure on 2027-02-18. `python -m
+  build` is warning-free and `twine check` passes. `anvil-sdk` is **unclaimed
+  on PyPI** as of today. Nothing has been published.
+
+### Open decisions (yours, not an agent's)
+
+1. **Hosted demo or not.** ADR-0019 and the README say "no hosted version",
+   yet three of the last four efforts were hosted-demo attempts. Either write
+   an ADR that a *read-only showcase* demo is compatible with ADR-0019, or drop
+   the effort. Don't attempt another deploy until this is settled.
+2. **npm name.** The `@anvil` scope on npm belongs to someone else (it
+   publishes `@anvil/common-asc`), and unscoped `anvil-sdk` is also taken, so
+   `@anvil/sdk` **cannot be published as named**. Pick a scope you own (e.g.
+   your npm username or an org you create) and rename in
+   `sdks/typescript/package.json`, the READMEs, `EmptyTraces.tsx` and the skill.
+3. **Publishing the Python SDK** to PyPI needs your account/token — then swap
+   the git-URL install line in `EmptyTraces.tsx` back to `pip install anvil-sdk`.
+
+### Still-known gaps (unchanged)
+
+- LLM judges are offered in the grader picker even when the worker image lacks
+  the provider SDKs (README documents the `WORKER_EXTRAS=[judges,otel]`
+  rebuild). A real fix: have the worker's grader announcement (ADR-0023) mark
+  judges unavailable, and the picker disable them — that last part is UI.
+- Post-v1 backlog in `plan.md` items 2–5 (versioning ADR, release process, ops
+  guide, benchmarks) are untouched.
 
 ## 2026-08-05 (final) — every feature exercised; two more bugs
 
@@ -1272,12 +1325,8 @@ API-death scenarios.
   `feedback_consumer.py` (Phase 9 — deferred-retry sorted set, upsert, tenant
   guard at persist), and `retention.py` (Phase 10 — batched sweep + monotonic
   usage rollups). No stubs remain in the worker.
-  `pricing.py` is **partly verified**: Anthropic entries were checked against the
-  published list on 2026-07-21 and Google's were added under ADR-0016, but the
-  two OpenAI entries are still marked `# placeholders — verify` in the file.
-  Don't make a user-facing cost claim on a `gpt-4o` trace. (Earlier STATUS text
-  called the whole table unverified in one place and corrected in another;
-  neither was right.)
+  `pricing.py` is **verified**: Anthropic entries on 2026-07-21, Google's under
+  ADR-0016, Groq's on 2026-07-28, and OpenAI's on 2026-11-08.
 - `apps/web`: the full dashboard — see the Phase 4 and Phase 5 sections above
   for what it contains. (This entry previously described a placeholder page with
   `npm install` not yet run; that was two phases out of date.)

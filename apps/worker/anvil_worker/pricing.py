@@ -19,7 +19,8 @@ PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.0-flash": (0.10, 0.40),
-    # OpenAI (placeholders — verify)
+    # OpenAI — verified 2026-11-08 against developers.openai.com/api/docs/pricing
+    # (standard tier; batch and priority are priced differently).
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
     # Groq — verified 2026-07-28 against groq.com/pricing. Keyed on the full
