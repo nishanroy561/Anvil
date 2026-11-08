@@ -47,8 +47,16 @@ None of this is in `plan.md`; recorded so the next session doesn't rediscover it
    `@anvil/sdk` **cannot be published as named**. Pick a scope you own (e.g.
    your npm username or an org you create) and rename in
    `sdks/typescript/package.json`, the READMEs, `EmptyTraces.tsx` and the skill.
-3. **Publishing the Python SDK** to PyPI needs your account/token — then swap
-   the git-URL install line in `EmptyTraces.tsx` back to `pip install anvil-sdk`.
+3. ~~Publishing the Python SDK~~ — **done 2026-11-08: `anvil-sdk` 0.1.0 is on
+   PyPI** (https://pypi.org/p/anvil-sdk), verified by a clean-venv install.
+   Released by `.github/workflows/publish-sdk.yml` via Trusted Publishing on
+   tag `sdk-py-v*`, gated by the `pypi` GitHub environment (manual approval).
+   Release = bump version in `pyproject.toml` *and* `anvil_sdk/__init__.py`,
+   merge, push a matching tag, approve. First attempt failed `invalid-publisher`
+   because the PyPI pending-publisher form had never been saved — if that error
+   recurs, check pypi.org → Publishing first. **Still to do:** swap the git-URL
+   install line in `EmptyTraces.tsx` (UI — ask first) and the skill to
+   `pip install anvil-sdk`.
 
 ### Still-known gaps (unchanged)
 
