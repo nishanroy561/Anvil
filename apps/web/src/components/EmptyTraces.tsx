@@ -68,20 +68,16 @@ def answer(question: str) -> str:
           </pre>
         </div>
         {/*
-          `pip install anvil-sdk` is what this said, and it 404s — the package is
-          not on PyPI, so the very first instruction failed for everyone who was
-          not already working inside a checkout. Installing from the repository
-          is the command that actually works today; swap it back the day the SDK
-          is published.
+          anvil-sdk is on PyPI as of 0.1.0 (2026-11-08). The TypeScript SDK is
+          not published, and `@anvil` on npm belongs to someone else, so naming
+          a package here would send people to an install that fails — say so
+          instead, and name the real package once it exists.
         */}
         <p className="mt-3 text-2xs leading-relaxed text-ink-faint">
-          <code className="font-mono">
-            pip install
-            &quot;git+https://github.com/nishanroy561/Anvil.git#subdirectory=sdks/python&quot;
-          </code>
-          <br />
-          TypeScript: <code className="font-mono">@anvil/sdk</code> · traces
+          <code className="font-mono">pip install anvil-sdk</code> · traces
           appear within seconds of your first request
+          <br />
+          TypeScript SDK: not yet published to npm
         </p>
       </div>
     </div>
